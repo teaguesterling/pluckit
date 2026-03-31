@@ -1,0 +1,861 @@
+# pluckit API Reference
+# Machine-parseable specification for training data generation.
+#
+# This file defines:
+#   - Types and their relationships
+#   - Selectors (vocabulary)
+#   - Operations (with signatures, categories, and examples)
+#   - Composition rules (what chains after what)
+#
+# Used by: training/generate.py to produce (intent, chain) pairs
+
+---
+version: "0.1.0"
+
+# =============================================================================
+# Types
+# =============================================================================
+types:
+  Source:
+    description: "A set of files (lazy, no I/O until needed)"
+    produces: [Selection]
+
+  Selection:
+    description: "A set of AST nodes, potentially across files"
+    produces: [Selection, Isolated, History, View, terminal]
+
+  Isolated:
+    description: "A runnable block extracted from context with auto-detected interface"
+    produces: [terminal]
+
+  History:
+    description: "A sequence of versions of a selection, indexed by commit"
+    produces: [Selection, terminal]
+
+  View:
+    description: "An assembled collection of related code with annotations"
+    produces: [terminal]
+
+  terminal:
+    description: "End of chain — returns data (str, int, dict, list, TestResult, DiffResult, etc.)"
+    produces: []
+
+# =============================================================================
+# Selectors
+# =============================================================================
+selectors:
+  node_types:
+    - { short: ".fn",      full: "function_definition",  description: "Function" }
+    - { short: ".cls",     full: "class_definition",     description: "Class" }
+    - { short: ".call",    full: "call",                 description: "Function call" }
+    - { short: ".ret",     full: "return_statement",     description: "Return statement" }
+    - { short: ".if",      full: "if_statement",         description: "If statement" }
+    - { short: ".for",     full: "for_statement",        description: "For loop" }
+    - { short: ".while",   full: "while_statement",      description: "While loop" }
+    - { short: ".try",     full: "try_statement",        description: "Try block" }
+    - { short: ".except",  full: "except_clause",        description: "Except handler" }
+    - { short: ".with",    full: "with_statement",       description: "Context manager" }
+    - { short: ".assign",  full: "assignment",           description: "Assignment" }
+    - { short: ".import",  full: "import_statement",     description: "Import" }
+    - { short: ".dec",     full: "decorator",            description: "Decorator" }
+    - { short: ".arg",     full: "parameter",            description: "Function parameter" }
+    - { short: ".str",     full: "string",               description: "String literal" }
+    - { short: ".num",     full: "number",               description: "Numeric literal" }
+    - { short: ".block",   full: "block",                description: "Indented body" }
+    - { short: ".comment", full: "comment",              description: "Comment" }
+
+  name_selector:
+    syntax: "#<identifier>"
+    examples:
+      - { selector: ".fn#validate_token",  description: "function named validate_token" }
+      - { selector: ".cls#AuthService",    description: "class named AuthService" }
+      - { selector: ".call#print",         description: "call to print()" }
+      - { selector: ".import#json",        description: "import of json" }
+
+  attribute_selectors:
+    - { syntax: "[name^=\"prefix\"]",  description: "name starts with prefix" }
+    - { syntax: "[name$=\"suffix\"]",  description: "name ends with suffix" }
+    - { syntax: "[name*=\"substr\"]",  description: "name contains substr" }
+    - { syntax: "[params>=N]",         description: "N or more parameters" }
+    - { syntax: "[lines>N]",           description: "more than N lines" }
+
+  pseudo_selectors:
+    - { syntax: ":has(sel)",              description: "contains a descendant matching sel" }
+    - { syntax: ":not(sel)",              description: "does not match sel" }
+    - { syntax: ":first",                description: "first in document order" }
+    - { syntax: ":last",                 description: "last in document order" }
+    - { syntax: ":exported",             description: "public (no leading underscore)" }
+    - { syntax: ":private",              description: "starts with underscore" }
+    - { syntax: ":decorated(name)",      description: "has @name decorator" }
+
+  combinators:
+    - { syntax: "A B",   description: "B is a descendant of A" }
+    - { syntax: "A > B", description: "B is a direct child of A" }
+    - { syntax: "A + B", description: "B is the next sibling of A" }
+    - { syntax: "A ~ B", description: "B is a subsequent sibling of A" }
+
+# =============================================================================
+# Operations
+# =============================================================================
+operations:
+
+  # --- Entry points ---
+  entry:
+    - name: source
+      signature: "source(glob: str) -> Source"
+      category: entry
+      description: "Create a Source from a file glob pattern"
+      examples:
+        - { call: "source('src/**/*.py')", intent: "all Python files in src" }
+        - { call: "source('tests/**/*.py')", intent: "all test files" }
+        - { call: "source('**/*.ts')", intent: "all TypeScript files" }
+
+    - name: select
+      signature: "select(selector: str) -> Selection"
+      category: entry
+      description: "Select AST nodes from the working directory"
+      examples:
+        - { call: "select('.fn#validate_token')", intent: "the validate_token function" }
+        - { call: "select('.fn:exported')", intent: "all public functions" }
+        - { call: "select('.fn:has(.ret > .none)')", intent: "functions that return None" }
+
+  # --- Source operations ---
+  source_ops:
+    - name: find
+      signature: "Source.find(selector: str) -> Selection"
+      input: Source
+      output: Selection
+      category: query
+      description: "Find nodes matching selector within the source files"
+
+  # --- Query operations (Selection -> Selection) ---
+  query:
+    - name: find
+      signature: "Selection.find(selector: str) -> Selection"
+      input: Selection
+      output: Selection
+      category: query
+      description: "Narrow to descendants matching selector"
+      examples:
+        - { call: ".find('.fn')", intent: "find functions within" }
+        - { call: ".find('.call#print')", intent: "find print calls within" }
+        - { call: ".find('.if:has(.raise)')", intent: "find if blocks that raise" }
+
+    - name: filter
+      signature: "Selection.filter(predicate: Callable) -> Selection"
+      input: Selection
+      output: Selection
+      category: query
+      description: "Filter nodes by a predicate function"
+      predicate_examples:
+        - { predicate: "fn: fn.params().count() > 3", intent: "more than 3 parameters" }
+        - { predicate: "fn: fn.callers().count() == 0", intent: "no callers (dead code)" }
+        - { predicate: "fn: fn.coverage() < 0.5", intent: "less than 50% coverage" }
+        - { predicate: "fn: fn.complexity() > 10", intent: "high complexity" }
+        - { predicate: "fn: fn.failures().count() > 0", intent: "has failed before" }
+        - { predicate: "fn: fn.history().last_month().count() > 3", intent: "changed frequently this month" }
+        - { predicate: "fn: fn.lines() > 50", intent: "longer than 50 lines" }
+
+    - name: not_
+      signature: "Selection.not_(selector: str) -> Selection"
+      input: Selection
+      output: Selection
+      category: query
+      description: "Exclude nodes matching selector"
+
+    - name: unique
+      signature: "Selection.unique() -> Selection"
+      input: Selection
+      output: Selection
+      category: query
+      description: "Deduplicate nodes"
+
+  # --- Navigation (Selection -> Selection) ---
+  navigation:
+    - name: parent
+      signature: "Selection.parent(selector?: str) -> Selection"
+      input: Selection
+      output: Selection
+      category: query
+      description: "Navigate to parent, optionally filtered"
+
+    - name: children
+      signature: "Selection.children(selector?: str) -> Selection"
+      input: Selection
+      output: Selection
+      category: query
+      description: "Navigate to child nodes"
+
+    - name: siblings
+      signature: "Selection.siblings(selector?: str) -> Selection"
+      input: Selection
+      output: Selection
+      category: query
+
+    - name: next
+      signature: "Selection.next(selector?: str) -> Selection"
+      input: Selection
+      output: Selection
+      category: query
+
+    - name: prev
+      signature: "Selection.prev(selector?: str) -> Selection"
+      input: Selection
+      output: Selection
+      category: query
+
+  # --- Sub-selection (Selection -> Selection) ---
+  sub_selection:
+    - name: params
+      signature: "Selection.params() -> Selection"
+      input: Selection
+      output: Selection
+      category: query
+      description: "Parameters of a function"
+
+    - name: body
+      signature: "Selection.body() -> Selection"
+      input: Selection
+      output: Selection
+      category: query
+      description: "Body of a function, class, loop, or conditional"
+
+  # --- Reading (Selection -> terminal) ---
+  reading:
+    - name: text
+      signature: "Selection.text() -> str | list[str]"
+      input: Selection
+      output: terminal
+      category: terminal
+      description: "Source text of each node"
+
+    - name: attr
+      signature: "Selection.attr(name: str) -> Any"
+      input: Selection
+      output: terminal
+      category: terminal
+      description: "Node attribute (name, line, file, end_line)"
+
+    - name: count
+      signature: "Selection.count() -> int"
+      input: Selection
+      output: terminal
+      category: terminal
+
+    - name: names
+      signature: "Selection.names() -> list[str]"
+      input: Selection
+      output: terminal
+      category: terminal
+
+    - name: complexity
+      signature: "Selection.complexity() -> int | list[int]"
+      input: Selection
+      output: terminal
+      category: terminal
+      description: "Cyclomatic complexity heuristic"
+
+    - name: interface
+      signature: "Selection.interface() -> dict"
+      input: Selection
+      output: terminal
+      category: terminal
+      description: "Read/write interface from scope analysis: {reads, writes, calls}"
+
+  # --- Structural mutations (Selection -> Selection) ---
+  mutation:
+    - name: addParam
+      signature: "Selection.addParam(spec: str) -> Selection"
+      input: Selection
+      output: Selection
+      category: mutate
+      description: "Add parameter to function signatures"
+      param_examples:
+        - "timeout: int = 30"
+        - "log_level: str | None = None"
+        - "dry_run: bool = False"
+        - "retry_count: int = 3"
+        - "callback: Callable | None = None"
+
+    - name: removeParam
+      signature: "Selection.removeParam(name: str) -> Selection"
+      input: Selection
+      output: Selection
+      category: mutate
+
+    - name: retype
+      signature: "Selection.retype(new_type: str) -> Selection"
+      input: Selection
+      output: Selection
+      category: mutate
+      description: "Change a parameter's type annotation"
+
+    - name: rename
+      signature: "Selection.rename(new_name: str) -> Selection"
+      input: Selection
+      output: Selection
+      category: mutate
+      description: "Rename definition and all references (scope-aware)"
+
+    - name: prepend
+      signature: "Selection.prepend(code: str) -> Selection"
+      input: Selection
+      output: Selection
+      category: mutate
+      description: "Insert code at top of body"
+
+    - name: append
+      signature: "Selection.append(code: str) -> Selection"
+      input: Selection
+      output: Selection
+      category: mutate
+      description: "Insert code at bottom of body"
+
+    - name: wrap
+      signature: "Selection.wrap(before: str, after: str) -> Selection"
+      input: Selection
+      output: Selection
+      category: mutate
+      description: "Wrap in surrounding code"
+
+    - name: unwrap
+      signature: "Selection.unwrap() -> Selection"
+      input: Selection
+      output: Selection
+      category: mutate
+      description: "Remove wrapping construct, dedent contents"
+
+    - name: replaceWith
+      signature: "Selection.replaceWith(code: str) -> Selection"
+      input: Selection
+      output: Selection
+      category: mutate
+      description: "Replace source text"
+
+    - name: remove
+      signature: "Selection.remove() -> Selection"
+      input: Selection
+      output: Selection
+      category: mutate
+
+    - name: move_to
+      signature: "Selection.move_to(path: str) -> Selection"
+      input: Selection
+      output: Selection
+      category: mutate
+      description: "Move to different file, update imports and references"
+
+    - name: extract
+      signature: "Selection.extract(name: str) -> Selection"
+      input: Selection
+      output: Selection
+      category: mutate
+      description: "Extract into new function, auto-detect parameters from scope"
+
+    - name: inline
+      signature: "Selection.inline() -> Selection"
+      input: Selection
+      output: Selection
+      category: mutate
+      description: "Replace call sites with function body"
+
+  # --- Relationship operations (Selection -> Selection) ---
+  relationships:
+    - name: callers
+      signature: "Selection.callers() -> Selection"
+      input: Selection
+      output: Selection
+      category: query
+      description: "Functions that call this selection"
+
+    - name: callees
+      signature: "Selection.callees() -> Selection"
+      input: Selection
+      output: Selection
+      category: query
+
+    - name: references
+      signature: "Selection.references() -> Selection"
+      input: Selection
+      output: Selection
+      category: query
+      description: "All references (imports, annotations, assignments)"
+
+    - name: dependents
+      signature: "Selection.dependents() -> Selection"
+      input: Selection
+      output: Selection
+      category: query
+      description: "Transitive callers"
+
+    - name: dependencies
+      signature: "Selection.dependencies() -> Selection"
+      input: Selection
+      output: Selection
+      category: query
+      description: "Transitive callees + imports"
+
+    - name: reachable
+      signature: "Selection.reachable(max_depth?: int) -> Selection"
+      input: Selection
+      output: Selection
+      category: query
+
+    - name: call_chain
+      signature: "Selection.call_chain() -> Selection"
+      input: Selection
+      output: Selection
+      category: query
+      description: "Linear call chain in execution order"
+
+  # --- Similarity (Selection -> Selection or terminal) ---
+  similarity:
+    - name: similar
+      signature: "Selection.similar(threshold: float) -> Selection"
+      input: Selection
+      output: Selection
+      category: query
+      description: "Structurally similar nodes (AST, not text)"
+
+    - name: clones
+      signature: "Selection.clones(threshold?: float) -> list[Selection]"
+      input: Selection
+      output: terminal
+      category: terminal
+
+    - name: common_pattern
+      signature: "Selection.common_pattern() -> Selection"
+      input: Selection
+      output: Selection
+      category: query
+      description: "Shared AST skeleton across all nodes"
+
+    - name: refactor
+      signature: "Selection.refactor(name: str) -> Selection"
+      input: Selection
+      output: Selection
+      category: mutate
+      description: "Extract common pattern, replace instances with calls"
+
+  # --- Scope operations (Selection -> Selection or terminal) ---
+  scope:
+    - name: refs
+      signature: "Selection.refs(name?: str) -> Selection"
+      input: Selection
+      output: Selection
+      category: query
+      description: "References within this selection"
+
+    - name: defs
+      signature: "Selection.defs(name?: str) -> Selection"
+      input: Selection
+      output: Selection
+      category: query
+      description: "Definitions within this selection"
+
+    - name: resolves_to
+      signature: "Selection.resolves_to(selector: str) -> Selection"
+      input: Selection
+      output: Selection
+      category: query
+      description: "Filter references by what they resolve to"
+
+    - name: shadows
+      signature: "Selection.shadows() -> Selection"
+      input: Selection
+      output: Selection
+      category: query
+
+    - name: unused_params
+      signature: "Selection.unused_params() -> Selection"
+      input: Selection
+      output: Selection
+      category: query
+
+  # --- History (Selection -> History or terminal) ---
+  history:
+    - name: history
+      signature: "Selection.history() -> History"
+      input: Selection
+      output: History
+      category: query
+
+    - name: at
+      signature: "Selection.at(ref: str) -> Selection"
+      input: Selection
+      output: Selection
+      category: query
+      description: "Version at a point in time or ref"
+      ref_examples:
+        - "2025-06-15"
+        - "last_green_build"
+        - "HEAD~5"
+        - "last_week"
+        - "1_month_ago"
+        - "before_refactor"
+
+    - name: diff
+      signature: "Selection.diff(other: Selection) -> DiffResult"
+      input: Selection
+      output: terminal
+      category: terminal
+      description: "Structural diff"
+
+    - name: blame
+      signature: "Selection.blame() -> Selection"
+      input: Selection
+      output: terminal
+      category: terminal
+
+    - name: authors
+      signature: "Selection.authors() -> list[str]"
+      input: Selection
+      output: terminal
+      category: terminal
+
+    - name: filmstrip
+      signature: "Selection.filmstrip() -> list[Selection]"
+      input: Selection
+      output: terminal
+      category: terminal
+
+    - name: when
+      signature: "Selection.when(selector: str) -> History"
+      input: Selection
+      output: terminal
+      category: terminal
+      description: "When did this structural property first appear?"
+
+    - name: co_changes
+      signature: "Selection.co_changes(threshold: float) -> list[tuple]"
+      input: Selection
+      output: terminal
+      category: terminal
+      description: "Code that always changes together"
+
+  # --- Behavior (Selection -> terminal) ---
+  behavior:
+    - name: test
+      signature: "Selection.test(inputs?: dict) -> TestResult"
+      input: Selection
+      output: terminal
+      category: delegate
+      description: "Run in isolation via blq sandbox"
+
+    - name: isolate
+      signature: "Selection.isolate() -> Isolated"
+      input: Selection
+      output: Isolated
+      category: query
+      description: "Extract into runnable form with auto-detected interface"
+
+    - name: coverage
+      signature: "Selection.coverage() -> float | dict"
+      input: Selection
+      output: terminal
+      category: terminal
+
+    - name: failures
+      signature: "Selection.failures() -> History"
+      input: Selection
+      output: terminal
+      category: terminal
+
+    - name: timing
+      signature: "Selection.timing() -> dict"
+      input: Selection
+      output: terminal
+      category: terminal
+
+    - name: inputs
+      signature: "Selection.inputs() -> list[dict]"
+      input: Selection
+      output: terminal
+      category: terminal
+
+    - name: outputs
+      signature: "Selection.outputs() -> list[Any]"
+      input: Selection
+      output: terminal
+      category: terminal
+
+    - name: runs
+      signature: "Selection.runs() -> History"
+      input: Selection
+      output: terminal
+      category: terminal
+
+    - name: fuzz
+      signature: "Selection.fuzz(n: int) -> list[TestResult]"
+      input: Selection
+      output: terminal
+      category: delegate
+
+    - name: benchmark
+      signature: "Selection.benchmark(n: int) -> dict"
+      input: Selection
+      output: terminal
+      category: delegate
+
+    - name: trace
+      signature: "Selection.trace(inputs: dict) -> Trace"
+      input: Selection
+      output: terminal
+      category: delegate
+
+  # --- Isolated operations ---
+  isolated:
+    - name: test
+      signature: "Isolated.test(inputs?: dict) -> TestResult"
+      input: Isolated
+      output: terminal
+      category: delegate
+
+    - name: interface
+      signature: "Isolated.interface() -> dict"
+      input: Isolated
+      output: terminal
+      category: terminal
+
+    - name: trace
+      signature: "Isolated.trace(inputs: dict) -> Trace"
+      input: Isolated
+      output: terminal
+      category: delegate
+
+    - name: fuzz
+      signature: "Isolated.fuzz(n: int) -> list[TestResult]"
+      input: Isolated
+      output: terminal
+      category: delegate
+
+    - name: benchmark
+      signature: "Isolated.benchmark(n: int) -> dict"
+      input: Isolated
+      output: terminal
+      category: delegate
+
+  # --- Delegate operations (Selection -> Selection or terminal) ---
+  delegate:
+    - name: black
+      signature: "Selection.black() -> Selection"
+      input: Selection
+      output: Selection
+      category: delegate
+
+    - name: ruff_fix
+      signature: "Selection.ruff_fix() -> Selection"
+      input: Selection
+      output: Selection
+      category: delegate
+
+    - name: isort
+      signature: "Selection.isort() -> Selection"
+      input: Selection
+      output: Selection
+      category: delegate
+
+    - name: format
+      signature: "Selection.format(tool: str, args?: dict) -> Selection"
+      input: Selection
+      output: Selection
+      category: delegate
+
+    - name: guard
+      signature: "Selection.guard(exception_type: str, strategy: str) -> Selection"
+      input: Selection
+      output: Selection
+      category: delegate
+      description: "Context-aware error handling"
+      strategy_examples:
+        - "log and reraise"
+        - "retry 3 times"
+        - "return None"
+        - "log.error and continue"
+        - "raise custom exception"
+
+    - name: save
+      signature: "Selection.save(message?: str) -> None"
+      input: Selection
+      output: terminal
+      category: delegate
+      description: "Commit via jetsam. Auto-generates message from intent if not provided."
+
+  # --- Metadata (Selection -> Selection) ---
+  metadata:
+    - name: intent
+      signature: "Selection.intent(description: str) -> Selection"
+      input: Selection
+      output: Selection
+      category: metadata
+      description: "Attach intent metadata for tracing and commit messages"
+
+    - name: preview
+      signature: "Selection.preview() -> str"
+      input: Selection
+      output: terminal
+      category: terminal
+
+    - name: explain
+      signature: "Selection.explain() -> str"
+      input: Selection
+      output: terminal
+      category: terminal
+      description: "Show query plan"
+
+    - name: dry_run
+      signature: "Selection.dry_run() -> DiffResult"
+      input: Selection
+      output: terminal
+      category: terminal
+
+  # --- History operations ---
+  history_ops:
+    - name: map
+      signature: "History.map(fn: Callable) -> History"
+      input: History
+      output: History
+      category: query
+
+    - name: filter
+      signature: "History.filter(fn: Callable) -> History"
+      input: History
+      output: History
+      category: query
+
+    - name: at
+      signature: "History.at(ref: str) -> Selection"
+      input: History
+      output: Selection
+      category: query
+
+  # --- View operations ---
+  view:
+    - name: impact
+      signature: "Selection.impact() -> View"
+      input: Selection
+      output: View
+      category: query
+      description: "Selection + callers + tests + coverage annotations"
+
+    - name: compare
+      signature: "Selection.compare() -> CompareResult"
+      input: Selection
+      output: terminal
+      category: terminal
+
+# =============================================================================
+# Composition rules (for chain validation and training generation)
+# =============================================================================
+composition:
+  # input_type -> list of valid next operations
+  Source: [find]
+  Selection:
+    query: [find, filter, not_, unique, parent, children, siblings, next, prev,
+            params, body, callers, callees, references, dependents, dependencies,
+            reachable, call_chain, similar, common_pattern, refs, defs,
+            resolves_to, shadows, unused_params, at, history, isolate, impact]
+    mutate: [addParam, removeParam, retype, rename, prepend, append, wrap,
+             unwrap, replaceWith, remove, move_to, extract, inline, refactor]
+    delegate: [black, ruff_fix, isort, format, guard, test, fuzz, benchmark,
+               trace, save]
+    terminal: [text, attr, count, names, complexity, interface, diff, blame,
+               authors, filmstrip, when, co_changes, coverage, failures,
+               timing, inputs, outputs, runs, preview, explain, dry_run,
+               compare, clones]
+    metadata: [intent]
+  Isolated: [test, interface, trace, fuzz, benchmark]
+  History: [map, filter, at]
+  View: []
+
+  # After a mutation, all Selection operations are still available
+  # After a delegate that returns Selection, all Selection operations are still available
+  # After a terminal, chain ends
+
+# =============================================================================
+# Example chains (seed for training generation)
+# =============================================================================
+example_chains:
+  simple_queries:
+    - intent: "find all public functions"
+      chain: "select('.fn:exported')"
+    - intent: "find all test functions"
+      chain: "source('tests/**/*.py').find('.fn[name^=\"test_\"]')"
+    - intent: "find functions that return None"
+      chain: "select('.fn:has(.ret > .none)')"
+    - intent: "find all database calls"
+      chain: "select('.call[name*=\"query\"]')"
+    - intent: "find functions with more than 5 parameters"
+      chain: "select('.fn').filter(fn: fn.params().count() > 5)"
+    - intent: "find unused functions"
+      chain: "select('.fn:exported').filter(fn: fn.callers().count() == 0)"
+    - intent: "find complex functions"
+      chain: "select('.fn').filter(fn: fn.complexity() > 10)"
+
+  mutations:
+    - intent: "add timeout parameter to all public functions"
+      chain: "select('.fn:exported').addParam('timeout: int = 30')"
+    - intent: "rename process_data to transform_batch"
+      chain: "select('.fn#process_data').rename('transform_batch')"
+    - intent: "remove all print statements"
+      chain: "select('.call#print').parent('.fn').find('.call#print').remove()"
+    - intent: "add logging to all exported functions"
+      chain: "select('.fn:exported').body().prepend('logger.debug(f\"entering {__name__}\")')"
+    - intent: "wrap database calls in try/except"
+      chain: "select('.call[name*=\"query\"]').guard('DatabaseError', 'log and reraise')"
+    - intent: "extract the validation logic from signup"
+      chain: "select('.fn#signup .if:first').extract('_validate_signup_input')"
+
+  pipelines:
+    - intent: "add timeout parameter, format, test, and commit"
+      chain: "select('.fn:exported').addParam('timeout: int = 30').black().test().save('feat: add timeout parameter')"
+    - intent: "find similar validation functions and extract common pattern"
+      chain: "select('.fn[name^=\"validate_\"]').similar(0.7).refactor('validate_credential')"
+    - intent: "add error handling to API calls, format, and save"
+      chain: "source('src/client/**/*.py').find('.call[name*=\"request\"]').guard('RequestError', 'retry 3 times').black().save('fix: add retry to API calls')"
+
+  cross_dimensional:
+    - intent: "find undertested code that fails often"
+      chain: "select('.fn').filter(fn: fn.coverage() < 0.5).filter(fn: fn.failures().count() > 0)"
+    - intent: "find functions that changed this week and started failing"
+      chain: "select('.fn').filter(fn: fn.history().last_week().count() > 0).filter(fn: fn.failures().after('last_week').count() > 0)"
+    - intent: "find dead code that used to have callers"
+      chain: "select('.fn:exported').filter(fn: fn.callers().count() == 0).filter(fn: fn.callers().at('6_months_ago').count() > 0)"
+    - intent: "find the riskiest functions in the codebase"
+      chain: "select('.fn').filter(fn: fn.complexity() > 10).filter(fn: fn.coverage() < 0.5).filter(fn: fn.history().last_month().count() > 3).filter(fn: fn.failures().count() > 0).sort(fn: fn.dependents().count())"
+
+  history:
+    - intent: "what changed in validate_token since the last green build"
+      chain: "select('.fn#validate_token').diff(select('.fn#validate_token').at('last_green_build'))"
+    - intent: "show the evolution of process_data"
+      chain: "select('.fn#process_data').filmstrip()"
+    - intent: "when did validate_token start returning None"
+      chain: "select('.fn#validate_token').when('.ret > .none')"
+    - intent: "find code that always changes together"
+      chain: "select('.fn').co_changes(0.8)"
+    - intent: "who has modified the auth module"
+      chain: "source('src/auth/**/*.py').find('.fn').authors()"
+
+  isolation:
+    - intent: "isolate the inner loop and test it"
+      chain: "select('.fn#process_data .for:first').isolate().test({'items': [1, 2, 3]})"
+    - intent: "what does this block need from its enclosing scope"
+      chain: "select('.fn#process_data .for:first').interface()"
+    - intent: "run the old version of validate_token against current inputs"
+      chain: "select('.fn#validate_token').at('before_refactor').isolate().test(select('.fn#validate_token').inputs().last(10))"
+
+  with_intent:
+    - intent: "extract validation functions before adding MFA support"
+      chain: "select('.fn[name^=\"validate_\"]').intent('Extract common skeleton before adding validate_mfa').similar(0.7).refactor('validate_credential').test().save()"
+    - intent: "add log_level for SLA compliance"
+      chain: "select('.fn:exported').intent('Add log_level parameter for SLA compliance').addParam('log_level: str | None = None').body().prepend('if log_level:\\n    logging.setLevel(log_level)').test().save()"
+
+  views:
+    - intent: "show the request handling pipeline"
+      chain: "select('.fn#handle_request').call_chain()"
+    - intent: "what would break if I change validate_token"
+      chain: "select('.fn#validate_token').impact()"
+    - intent: "show everything related to authentication"
+      chain: "select('.fn#login, .fn#logout, .fn#refresh_token').reachable(max_depth=3)"
+    - intent: "compare the validation functions"
+      chain: "select('.fn[name^=\"validate_\"]').compare()"
