@@ -1,0 +1,23 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "pluckit"
+version = "0.1.0"
+description = "A fluent API for querying, analyzing, and mutating source code"
+requires-python = ">=3.12"
+dependencies = [
+    "duckdb>=1.1.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/pluckit"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
