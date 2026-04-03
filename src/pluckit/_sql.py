@@ -2,15 +2,100 @@
 """SQL fragment builders for sitting_duck queries."""
 from __future__ import annotations
 
+import re
+
 
 def _esc(s: str) -> str:
     """Escape a string for SQL single-quote interpolation."""
     return s.replace("'", "''")
 
 
+# Mapping from taxonomy class names (after alias resolution) to semantic_type codes.
+# These are the numeric values returned by semantic_type_code() in sitting_duck.
+_TAXONOMY_TO_SEMANTIC: dict[str, int] = {
+    # Definition
+    "def-func": 240,   # DEFINITION_FUNCTION
+    "def-class": 248,  # DEFINITION_CLASS
+    "def-var": 244,    # DEFINITION_VARIABLE
+    "def-module": 252, # DEFINITION_MODULE
+    # Flow
+    "flow-loop": 148,  # FLOW_LOOP
+    "flow-jump": 152,  # FLOW_JUMP
+    # Error handling
+    "error-try": 160,    # ERROR_TRY
+    "error-catch": 164,  # ERROR_CATCH
+    "error-throw": 168,  # ERROR_THROW
+    "error-finally": 172, # ERROR_FINALLY
+    # Organization
+    "block-body": 176,  # ORGANIZATION_BLOCK
+    "block-ns": 176,    # ORGANIZATION_BLOCK (modules/namespaces)
+    # Literals
+    "literal-str": 68,   # LITERAL_STRING
+    "literal-num": 64,   # LITERAL_NUMBER
+    # Name
+    "name-id": 80,  # NAME_IDENTIFIER
+    # Metadata
+    "metadata-comment": 32,     # METADATA_COMMENT
+    "metadata-annotation": 36,  # METADATA_ANNOTATION
+    # External
+    "external-import": 48,  # EXTERNAL_IMPORT
+    "external-export": 52,  # EXTERNAL_EXPORT
+    # Statement
+    "statement-assign": 204,  # OPERATOR_ASSIGNMENT
+    # Execution
+    "execution": 128,  # EXECUTION_STATEMENT
+}
+
+# Selector token pattern: .class-name  optionally followed by #id
+_SELECTOR_RE = re.compile(
+    r"^\.(?P<cls>[a-zA-Z_-]+)(?:#(?P<id>[^\s\[:\#]+))?(?P<rest>.*)$"
+)
+
+
+def _selector_to_where(selector: str) -> str:
+    """Translate a CSS-like selector to a SQL WHERE clause.
+
+    Handles:
+      .class-name          → semantic_type = N
+      .class-name#id-name  → semantic_type = N AND name = 'id-name'
+
+    Returns a SQL boolean expression string.
+    """
+    from pluckit.selectors import resolve_alias
+
+    # Resolve alias first (.function → .def-func)
+    resolved = resolve_alias(selector)
+
+    m = _SELECTOR_RE.match(resolved)
+    if m is None:
+        # Fallback: try to match by type name directly
+        return "1=1"
+
+    cls = m.group("cls")
+    id_name = m.group("id")
+
+    conditions = []
+
+    sem_code = _TAXONOMY_TO_SEMANTIC.get(cls)
+    if sem_code is not None:
+        conditions.append(f"semantic_type = {sem_code}")
+
+    if id_name:
+        conditions.append(f"name = '{_esc(id_name)}'")
+
+    if not conditions:
+        return "1=1"
+
+    return " AND ".join(conditions)
+
+
 def ast_select_sql(source: str, selector: str) -> str:
-    """Build SQL to call ast_select."""
-    return f"SELECT * FROM ast_select('{_esc(source)}', '{_esc(selector)}')"
+    """Build SQL to select AST nodes matching selector from source files.
+
+    Uses read_ast() with a WHERE clause derived from the selector.
+    """
+    where = _selector_to_where(selector)
+    return f"SELECT * FROM read_ast('{_esc(source)}') WHERE {where}"
 
 
 def read_ast_sql(source: str, **kwargs) -> str:
