@@ -212,13 +212,13 @@ _BUILTINS: list[dict] = [
     {
         "name": ":exported",
         "engine": "sitting_duck",
-        "sql_template": r"name NOT LIKE '\_%%' ESCAPE '\\'",
+        "sql_template": "name NOT LIKE '\\_%%' ESCAPE '\\'",
         "takes_arg": False,
     },
     {
         "name": ":private",
         "engine": "sitting_duck",
-        "sql_template": r"name LIKE '\_%%' ESCAPE '\\'",
+        "sql_template": "name LIKE '\\_%%' ESCAPE '\\'",
         "takes_arg": False,
     },
     {

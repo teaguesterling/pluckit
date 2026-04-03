@@ -10,7 +10,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
-from training.format import format_pair
+from training.format import format_pair, format_pair_completion, generate_operations_comment, main as format_main
 from training.spec import load_spec
 from training.system_prompt import generate_system_prompt
 
@@ -299,3 +299,93 @@ class TestCLISplit:
                 for line in val_file.read_text(encoding="utf-8").strip().splitlines()
             }
             assert train_intents.isdisjoint(val_intents)
+
+
+# ---------------------------------------------------------------------------
+# Context field tests
+# ---------------------------------------------------------------------------
+
+class TestFormatPairWithContext:
+    def test_context_included_in_user_message(self, system_prompt):
+        record = {
+            "intent": "Fix the TypeError",
+            "chain": "select('.fn').replaceWith('old', 'new')",
+            "context": "TypeError: expected str, got None\n  File 'auth.py', line 23",
+        }
+        result = format_pair(record, system_prompt)
+        user_msg = result["messages"][1]["content"]
+        assert "TypeError" in user_msg
+        assert "```" in user_msg  # code fences
+
+    def test_no_context_no_fences(self, system_prompt):
+        record = {
+            "intent": "find all functions",
+            "chain": "select('.fn')",
+        }
+        result = format_pair(record, system_prompt)
+        user_msg = result["messages"][1]["content"]
+        assert "```" not in user_msg
+        assert user_msg == "find all functions"
+
+
+# ---------------------------------------------------------------------------
+# Completion format tests
+# ---------------------------------------------------------------------------
+
+class TestCompletionFormat:
+    def test_format_pair_completion(self):
+        ops_spec = "# .find(selector) -> Selection  -- find descendants"
+        record = {
+            "intent": "find all public functions",
+            "chain": "select('.fn:exported')",
+        }
+        result = format_pair_completion(record, ops_spec)
+        assert "prompt" in result
+        assert "completion" in result
+        assert "from code_tools import" in result["prompt"]
+        assert "# TODO:" in result["prompt"]
+        assert result["completion"] == "select('.fn:exported')"
+
+    def test_completion_includes_context(self):
+        ops_spec = "# .find(selector) -> Selection"
+        record = {
+            "intent": "Fix the None return",
+            "chain": "select('.fn').replaceWith('return None', 'raise ValueError()')",
+            "context": "def validate(x):\n    return None",
+        }
+        result = format_pair_completion(record, ops_spec)
+        assert "# def validate(x):" in result["prompt"]
+        assert "# TODO: Fix the None return" in result["prompt"]
+
+    def test_completion_includes_ops_spec(self):
+        ops_spec = "# Available operations:\n# select(selector) -> Selection"
+        record = {
+            "intent": "count functions",
+            "chain": "select('.fn').count()",
+        }
+        result = format_pair_completion(record, ops_spec)
+        assert "Available operations" in result["prompt"]
+
+
+# ---------------------------------------------------------------------------
+# generate_operations_comment tests
+# ---------------------------------------------------------------------------
+
+class TestGenerateOperationsComment:
+    def test_returns_string(self):
+        spec = load_spec(SPEC_PATH)
+        result = generate_operations_comment(spec)
+        assert isinstance(result, str)
+        assert "select" in result
+        assert "source" in result
+        assert ".find" in result
+
+    def test_includes_mutation_ops(self):
+        spec = load_spec(SPEC_PATH)
+        result = generate_operations_comment(spec)
+        assert "addParam" in result or "rename" in result
+
+    def test_includes_query_ops(self):
+        spec = load_spec(SPEC_PATH)
+        result = generate_operations_comment(spec)
+        assert "find" in result
