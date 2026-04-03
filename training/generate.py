@@ -13,7 +13,7 @@ from pathlib import Path
 
 from training.spec import load_spec
 from training.chain_sampler import ChainSampler
-from training.intent import generate_intent
+from training.intent import generate_intent, generate_error_intent, generate_code_context_intent
 
 
 def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
@@ -101,25 +101,60 @@ def main(argv: list[str] | None = None) -> None:
             total += 1
 
         # 2. Synthetic pairs
-        for _ in range(args.count):
-            ex = sampler.sample()
-            shape_list = ex["shape"].split(".")
-            intent_meta = generate_intent(
-                ex["chain"],
-                shape_list,
-                ex["category"],
-                rng,
-                return_metadata=True,
-                paraphrase_ratio=args.paraphrase_ratio,
-                reverse_ratio=args.reverse_ratio,
-            )
+        # Distribution: 40% standard, 20% multi-language, 20% error-driven, 20% code-contextual
+        for i in range(args.count):
+            roll = rng.random()
+
+            if roll < 0.20:
+                # 20% error-driven
+                pair = sampler.sample_error_driven()
+                intent = generate_error_intent(pair["context"], rng)
+                intent_result = {"intent": intent, "strategy": "template"}
+            elif roll < 0.40:
+                # 20% code-contextual
+                pair = sampler.sample_code_contextual()
+                intent = generate_code_context_intent(
+                    pair["context"], pair.get("intent", pair.get("category", "fix issue")), rng
+                )
+                intent_result = {"intent": intent, "strategy": "template"}
+            elif roll < 0.60:
+                # 20% multi-language
+                pair = sampler.sample_multilang()
+                intent_result = generate_intent(
+                    chain=pair["chain"],
+                    shape=pair["shape"].split("."),
+                    category=pair["category"],
+                    rng=rng,
+                    return_metadata=True,
+                    paraphrase_ratio=args.paraphrase_ratio,
+                    reverse_ratio=args.reverse_ratio,
+                )
+            else:
+                # 40% standard Python chains (existing behavior)
+                pair = sampler.sample()
+                intent_result = generate_intent(
+                    chain=pair["chain"],
+                    shape=pair["shape"].split("."),
+                    category=pair["category"],
+                    rng=rng,
+                    return_metadata=True,
+                    paraphrase_ratio=args.paraphrase_ratio,
+                    reverse_ratio=args.reverse_ratio,
+                )
+
             record = {
-                "intent": intent_meta["intent"],
-                "chain": ex["chain"],
-                "shape": ex["shape"],
-                "category": ex["category"],
-                "strategy": intent_meta["strategy"],
+                "intent": intent_result["intent"],
+                "chain": pair["chain"],
+                "shape": pair["shape"],
+                "category": pair["category"],
+                "strategy": intent_result["strategy"],
             }
+            # Add optional fields
+            if "context" in pair:
+                record["context"] = pair["context"]
+            if "language" in pair:
+                record["language"] = pair["language"]
+
             _write_record(out, record)
             total += 1
 

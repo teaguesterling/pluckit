@@ -280,3 +280,63 @@ class TestCategorizeChain:
     def test_entry_only_is_query(self, sampler):
         cat = sampler._categorize_chain(["entry"])
         assert cat == "query"
+
+
+# ---------------------------------------------------------------------------
+# Error-driven sampling
+# ---------------------------------------------------------------------------
+
+class TestErrorDrivenSampling:
+    def test_returns_required_fields(self, sampler):
+        pair = sampler.sample_error_driven()
+        assert "chain" in pair
+        assert "intent" in pair
+        assert "context" in pair
+        assert "language" in pair
+        assert pair["category"] == "error_fix"
+
+    def test_context_contains_error(self, sampler):
+        pair = sampler.sample_error_driven()
+        # Context should contain an error message
+        assert "Error" in pair["context"] or "error" in pair["context"] or "panic" in pair["context"]
+
+    def test_intent_starts_with_fix(self, sampler):
+        pair = sampler.sample_error_driven()
+        assert pair["intent"].startswith("Fix:")
+
+
+# ---------------------------------------------------------------------------
+# Code-contextual sampling
+# ---------------------------------------------------------------------------
+
+class TestCodeContextualSampling:
+    def test_returns_required_fields(self, sampler):
+        pair = sampler.sample_code_contextual()
+        assert "chain" in pair
+        assert "intent" in pair
+        assert "context" in pair
+        assert "language" in pair
+
+    def test_context_contains_code(self, sampler):
+        pair = sampler.sample_code_contextual()
+        # Context should be actual code
+        assert len(pair["context"]) > 10
+
+
+# ---------------------------------------------------------------------------
+# Multi-language sampling
+# ---------------------------------------------------------------------------
+
+class TestMultilangSampling:
+    def test_returns_required_fields(self, sampler):
+        pair = sampler.sample_multilang()
+        assert "chain" in pair
+        assert "language" in pair
+        assert pair["language"] in ("python", "go", "typescript")
+
+    def test_produces_different_languages(self, sampler):
+        languages = set()
+        for _ in range(50):
+            pair = sampler.sample_multilang()
+            languages.add(pair["language"])
+        assert len(languages) >= 2

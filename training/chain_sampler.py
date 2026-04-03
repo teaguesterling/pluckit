@@ -26,6 +26,15 @@ from training.pools import (
     MODULE_PATHS,
     FUNCTION_NAMES,
     CLASS_NAMES,
+    ARG_SPECS,
+    DECORATOR_SPECS,
+    IMPORT_SPECS,
+    TYPE_ANNOTATIONS,
+    LANGUAGES,
+    sample_selector_for_language,
+    sample_module_path_for_language,
+    sample_error_context,
+    sample_code_context,
 )
 from training.chain_parser import parse_chain
 
@@ -211,6 +220,150 @@ class ChainSampler:
                 category = self._categorize_chain(op_categories)
                 results.append({"chain": chain, "shape": shape, "category": category})
         return results
+
+    def sample_error_driven(self) -> dict:
+        """Generate an error-driven (intent, chain, context) triple.
+
+        Returns dict with: chain, shape, category, intent, context, language
+        """
+        rng = self._rng
+        err = sample_error_context(rng)
+        lang = err["language"]
+        fn_name = err.get("function") or ""
+        file_path = err["file"]
+        line = err["line"]
+        fix_op = err["fix_op"]
+        error_msg = err["error"]
+
+        # Build the chain based on fix_op
+        selector = f".fn#{fn_name}" if fn_name else ".fn"
+        entry = f"source('{file_path}').find('{selector}')"
+
+        if fix_op == "replaceWith":
+            chain = f"{entry}.at_line({line}).replaceWith('old_code', 'fixed_code')"
+        elif fix_op == "prepend":
+            if lang == "go":
+                chain = f"{entry}.at_line({line}).prepend('if {fn_name.lower()} == nil {{\\n    return fmt.Errorf(\"{fn_name} is nil\")\\n}}')"
+            else:
+                tail = fn_name.split('_')[-1] if fn_name else 'value'
+                chain = f"{entry}.at_line({line}).prepend('if {tail} is None:\\n    raise ValueError(\"{fn_name} required\")')"
+        elif fix_op == "wrap":
+            chain = f"{entry}.at_line({line}).wrap('try:', 'except Exception as e:\\n    logger.exception(e)\\n    raise')"
+        elif fix_op == "guard":
+            exc_type = error_msg.split(":")[0].strip() if ":" in error_msg else "Exception"
+            chain = f"{entry}.guard('{exc_type}', 'log and reraise')"
+        elif fix_op == "addParam":
+            chain = f"{entry}.addParam('ctx context.Context', before='*')"
+        elif fix_op == "annotate":
+            chain = f"{entry}.returnType('bool | None')"
+        else:
+            chain = f"{entry}.at_line({line}).replaceWith('old_code', 'fixed_code')"
+
+        # Build intent from error message
+        intent = f"Fix: {error_msg}"
+
+        # Build context (the error traceback)
+        if fn_name:
+            context = f"{error_msg}\n  File \"{file_path}\", line {line}, in {fn_name}"
+        else:
+            context = f"{error_msg}\n  File \"{file_path}\", line {line}"
+
+        ops = parse_chain(chain)
+        shape = ".".join(op.name for op in ops)
+
+        return {
+            "chain": chain,
+            "shape": shape,
+            "category": "error_fix",
+            "intent": intent,
+            "context": context,
+            "language": lang,
+        }
+
+    def sample_code_contextual(self) -> dict:
+        """Generate a code-contextual (intent, chain, context) triple.
+
+        Returns dict with: chain, shape, category, intent, context, language
+        """
+        rng = self._rng
+        snip = sample_code_context(rng)
+        lang = snip["language"]
+
+        intent = snip["problem"]
+        context = snip["code"]
+        chain = snip["fix_chain"]
+
+        try:
+            ops = parse_chain(chain)
+            shape = ".".join(op.name for op in ops)
+        except Exception:
+            shape = "unknown"
+
+        return {
+            "chain": chain,
+            "shape": shape,
+            "category": "code_fix",
+            "intent": intent,
+            "context": context,
+            "language": lang,
+        }
+
+    def sample_multilang(self) -> dict:
+        """Generate a chain for a random language."""
+        rng = self._rng
+        lang_info = rng.choice(LANGUAGES)
+        lang = lang_info["name"]
+
+        # Override the entry point to use language-appropriate paths
+        length = rng.choices(_LENGTHS, weights=_WEIGHTS, k=1)[0]
+
+        if rng.random() < 0.5:
+            sel = self._quote(sample_selector_for_language(rng, lang))
+            entry_call = f"select({sel})"
+            current_type = "Selection"
+        else:
+            glob = self._quote(sample_module_path_for_language(rng, lang))
+            entry_call = f"source({glob})"
+            current_type = "Source"
+
+        op_calls = [entry_call]
+        op_names = ["select" if current_type == "Selection" else "source"]
+        op_categories = ["entry"]
+        remaining = length - 1
+
+        if current_type == "Source":
+            find_sel = sample_selector_for_language(rng, lang)
+            op_calls.append(f"find({self._quote(find_sel)})")
+            op_names.append("find")
+            op_categories.append("query")
+            current_type = "Selection"
+            remaining -= 1
+
+        while remaining > 0:
+            next_op_name, next_op_cat = self._pick_next_op(current_type, remaining)
+            if next_op_name is None:
+                break
+            op = self._spec.operations.get(next_op_name)
+            call = self._build_call(next_op_name, op)
+            op_calls.append(call)
+            op_names.append(next_op_name)
+            op_categories.append(next_op_cat)
+            output_type = op.output_type if op and op.output_type else "terminal"
+            current_type = output_type
+            remaining -= 1
+            if current_type == "terminal":
+                break
+
+        chain = ".".join(op_calls)
+        shape = ".".join(op_names)
+        category = self._categorize_chain(op_categories)
+
+        return {
+            "chain": chain,
+            "shape": shape,
+            "category": category,
+            "language": lang,
+        }
 
     def _categorize_chain(self, categories: list[str]) -> str:
         """Determine chain category from list of operation categories.
@@ -531,6 +684,72 @@ class ChainSampler:
         # sort — appears in example chains but not in spec ops
         if name == "sort":
             return "sort(fn: fn.dependents().count())"
+
+        # addArg
+        if name == "addArg":
+            spec_str = self._quote(rng.choice(ARG_SPECS))
+            return f"addArg({spec_str})"
+
+        # removeArg
+        if name == "removeArg":
+            param_name = self._quote(rng.choice(_REMOVE_PARAM_NAMES))
+            return f"removeArg({param_name})"
+
+        # replaceArg
+        if name == "replaceArg":
+            param_name = self._quote(rng.choice(_REMOVE_PARAM_NAMES))
+            expr = self._quote(rng.choice(["None", "default_value", "0", "''", "False"]))
+            return f"replaceArg({param_name}, {expr})"
+
+        # addDecorator
+        if name == "addDecorator":
+            dec = self._quote(rng.choice(DECORATOR_SPECS))
+            return f"addDecorator({dec})"
+
+        # removeDecorator
+        if name == "removeDecorator":
+            dec = self._quote(rng.choice(["deprecated", "staticmethod", "lru_cache", "override"]))
+            return f"removeDecorator({dec})"
+
+        # ensureImport
+        if name == "ensureImport":
+            imp = self._quote(rng.choice(IMPORT_SPECS))
+            return f"ensureImport({imp})"
+
+        # removeImport
+        if name == "removeImport":
+            mod = self._quote(rng.choice(["os", "sys", "re", "json", "typing"]))
+            return f"removeImport({mod})"
+
+        # annotate
+        if name == "annotate":
+            target = self._quote(rng.choice(["return", "self", "data", "result", "value"]))
+            type_str = self._quote(rng.choice(TYPE_ANNOTATIONS))
+            return f"annotate({target}, {type_str})"
+
+        # returnType
+        if name == "returnType":
+            type_str = self._quote(rng.choice(TYPE_ANNOTATIONS))
+            return f"returnType({type_str})"
+
+        # addMethod
+        if name == "addMethod":
+            method = self._quote(rng.choice([
+                "def __repr__(self) -> str:\\n    return f\"{self.__class__.__name__}\"",
+                "def validate(self) -> bool:\\n    return True",
+                "def to_dict(self) -> dict:\\n    return vars(self)",
+            ]))
+            return f"addMethod({method})"
+
+        # addProperty
+        if name == "addProperty":
+            prop_name = self._quote(rng.choice(["created_at", "updated_at", "is_active", "version"]))
+            return f"addProperty({prop_name})"
+
+        # addBase
+        if name == "addBase":
+            base = self._quote(rng.choice(["ABC", "BaseModel", "Serializable", "EventEmitter"]))
+            return f"addBase({base})"
 
         # Fallback: no-arg call
         return f"{name}()"

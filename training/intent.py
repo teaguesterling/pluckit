@@ -287,6 +287,49 @@ _TEMPLATES: dict[str, list[str]] = {
         "find {selector}",
         "search {selector}",
     ],
+    "addArg": [
+        "add {arg} argument to calls to {selector}",
+        "pass {arg} to all callers of {selector}",
+    ],
+    "removeArg": [
+        "remove {arg} from calls to {selector}",
+        "stop passing {arg} to {selector}",
+    ],
+    "addDecorator": [
+        "add {decorator} to {selector}",
+        "decorate {selector} with {decorator}",
+    ],
+    "removeDecorator": [
+        "remove {decorator} from {selector}",
+        "strip {decorator} decorator from {selector}",
+    ],
+    "ensureImport": [
+        "ensure {import_spec} is imported",
+        "add {import_spec} if missing",
+    ],
+    "removeImport": [
+        "remove unused {import_spec} import",
+        "clean up {import_spec} import",
+    ],
+    "annotate": [
+        "add type annotation to {selector}",
+        "annotate {selector} with type hints",
+    ],
+    "returnType": [
+        "set return type of {selector} to {type}",
+        "add return type {type} to {selector}",
+    ],
+    "addMethod": [
+        "add {method_name} method to {selector}",
+        "implement {method_name} on {selector}",
+    ],
+    "addBase": [
+        "make {selector} inherit from {base}",
+        "add {base} as base class to {selector}",
+    ],
+    "addProperty": [
+        "add {property_name} property to {selector}",
+    ],
     "_fallback": [
         "apply {op_name} to {selector}",
         "{op_name} on {selector}",
@@ -371,6 +414,51 @@ def _extract_chain_context(chain: str) -> dict[str, str]:
     if pred_match:
         ctx["predicate_desc"] = pred_match.group(1)
 
+    # addArg
+    arg_match = re.search(r'\baddArg\s*\(\s*([\'"])(.*?)\1', chain)
+    if arg_match:
+        ctx["arg"] = arg_match.group(2)
+
+    # addDecorator
+    dec_match = re.search(r'\baddDecorator\s*\(\s*([\'"])(.*?)\1', chain)
+    if dec_match:
+        ctx["decorator"] = dec_match.group(2)
+
+    # removeDecorator
+    rdec_match = re.search(r'\bremoveDecorator\s*\(\s*([\'"])(.*?)\1', chain)
+    if rdec_match:
+        ctx["decorator"] = rdec_match.group(2)
+
+    # ensureImport
+    imp_match = re.search(r'\bensureImport\s*\(\s*([\'"])(.*?)\1', chain)
+    if imp_match:
+        ctx["import_spec"] = imp_match.group(2)
+
+    # removeImport
+    rimp_match = re.search(r'\bremoveImport\s*\(\s*([\'"])(.*?)\1', chain)
+    if rimp_match:
+        ctx["import_spec"] = rimp_match.group(2)
+
+    # returnType
+    rt_match = re.search(r'\breturnType\s*\(\s*([\'"])(.*?)\1', chain)
+    if rt_match:
+        ctx["type"] = rt_match.group(2)
+
+    # addMethod
+    am_match = re.search(r'\baddMethod\s*\(\s*([\'"])(.*?)\1', chain)
+    if am_match:
+        ctx["method_name"] = am_match.group(2).split("(")[0].replace("def ", "").strip()
+
+    # addBase
+    ab_match = re.search(r'\baddBase\s*\(\s*([\'"])(.*?)\1', chain)
+    if ab_match:
+        ctx["base"] = ab_match.group(2)
+
+    # addProperty
+    ap_match = re.search(r'\baddProperty\s*\(\s*([\'"])(.*?)\1', chain)
+    if ap_match:
+        ctx["property_name"] = ap_match.group(2)
+
     return ctx
 
 
@@ -454,3 +542,71 @@ def _render_intent(op_name: str, ctx: dict[str, str], rng: random.Random) -> str
     safe_ctx.setdefault("prev_intent", "apply changes")
 
     return template.format_map(safe_ctx)
+
+
+# ---------------------------------------------------------------------------
+# Error-driven and code-contextual intent generators
+# ---------------------------------------------------------------------------
+
+_ERROR_FIX_TEMPLATES: list[str] = [
+    "Fix this error: {error}",
+    "Fix: {error}",
+    "{error} — fix it",
+    "Handle the {error_type} in {function}",
+    "Fix the {error_type} at line {line} in {file}",
+]
+
+
+def generate_error_intent(context: str, rng: random.Random) -> str:
+    """Generate an intent from an error context string.
+
+    Parameters
+    ----------
+    context:
+        Error traceback string, e.g. "TypeError: ...\n  File 'x.py', line 5, in foo"
+    rng:
+        A ``random.Random`` instance.
+    """
+    lines = context.strip().split("\n")
+    error_msg = lines[0] if lines else "unknown error"
+    error_type = error_msg.split(":")[0].strip() if ":" in error_msg else "error"
+
+    file_name = "unknown"
+    function = "unknown"
+    line_num = "?"
+    if len(lines) > 1:
+        tb_match = re.search(r'File "([^"]+)", line (\d+)(?:, in (\w+))?', lines[1])
+        if tb_match:
+            file_name = tb_match.group(1)
+            line_num = tb_match.group(2)
+            function = tb_match.group(3) or "unknown"
+
+    template = rng.choice(_ERROR_FIX_TEMPLATES)
+    return template.format_map(_SafeDict({
+        "error": error_msg,
+        "error_type": error_type,
+        "function": function,
+        "file": file_name,
+        "line": line_num,
+    }))
+
+
+def generate_code_context_intent(context: str, problem: str, rng: random.Random) -> str:
+    """Generate an intent from a code context and problem description.
+
+    Parameters
+    ----------
+    context:
+        Code snippet string showing the code to be fixed.
+    problem:
+        Short description of what the problem is.
+    rng:
+        A ``random.Random`` instance.
+    """
+    templates = [
+        "Fix this: {problem}",
+        "{problem} — fix it",
+        "This code has a problem: {problem}",
+        "Refactor: {problem}",
+    ]
+    return rng.choice(templates).format(problem=problem)
