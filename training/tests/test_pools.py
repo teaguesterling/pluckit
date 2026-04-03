@@ -16,6 +16,21 @@ from training.pools import (
     RENAME_TARGETS,
     sample_composed_selector,
     sample_selector,
+    LANGUAGES,
+    GO_FUNCTION_NAMES,
+    TS_FUNCTION_NAMES,
+    GO_CLASS_NAMES,
+    TS_CLASS_NAMES,
+    DECORATOR_SPECS,
+    IMPORT_SPECS,
+    ARG_SPECS,
+    TYPE_ANNOTATIONS,
+    ERROR_MESSAGES,
+    CODE_CONTEXT_SNIPPETS,
+    sample_selector_for_language,
+    sample_module_path_for_language,
+    sample_error_context,
+    sample_code_context,
 )
 
 
@@ -224,3 +239,118 @@ class TestSampleComposedSelector:
         results1 = [sample_composed_selector(rng1) for _ in range(20)]
         results2 = [sample_composed_selector(rng2) for _ in range(20)]
         assert results1 == results2
+
+
+# ---------------------------------------------------------------------------
+# New language pools and sampling functions
+# ---------------------------------------------------------------------------
+
+class TestLanguagePools:
+    def test_go_function_names_sufficient(self):
+        assert len(GO_FUNCTION_NAMES) >= 30
+
+    def test_ts_function_names_sufficient(self):
+        assert len(TS_FUNCTION_NAMES) >= 30
+
+    def test_go_class_names_sufficient(self):
+        assert len(GO_CLASS_NAMES) >= 15
+
+    def test_ts_class_names_sufficient(self):
+        assert len(TS_CLASS_NAMES) >= 15
+
+    def test_languages_list(self):
+        assert len(LANGUAGES) >= 3
+        names = [l["name"] for l in LANGUAGES]
+        assert "python" in names
+        assert "go" in names
+        assert "typescript" in names
+
+
+class TestNewPools:
+    def test_decorator_specs(self):
+        assert len(DECORATOR_SPECS) >= 10
+
+    def test_import_specs(self):
+        assert len(IMPORT_SPECS) >= 10
+
+    def test_arg_specs(self):
+        assert len(ARG_SPECS) >= 8
+
+    def test_type_annotations(self):
+        assert len(TYPE_ANNOTATIONS) >= 10
+
+    def test_error_messages_has_languages(self):
+        assert "python" in ERROR_MESSAGES
+        assert "go" in ERROR_MESSAGES
+        assert "typescript" in ERROR_MESSAGES
+
+    def test_error_messages_have_required_fields(self):
+        for lang, errors in ERROR_MESSAGES.items():
+            for err in errors:
+                assert "error" in err, f"Missing 'error' in {lang} error"
+                assert "file" in err, f"Missing 'file' in {lang} error"
+                assert "fix_op" in err, f"Missing 'fix_op' in {lang} error"
+
+    def test_code_context_snippets_has_languages(self):
+        assert "python" in CODE_CONTEXT_SNIPPETS
+        assert "go" in CODE_CONTEXT_SNIPPETS
+        assert "typescript" in CODE_CONTEXT_SNIPPETS
+
+    def test_code_context_has_required_fields(self):
+        for lang, snippets in CODE_CONTEXT_SNIPPETS.items():
+            for snip in snippets:
+                assert "code" in snip, f"Missing 'code' in {lang} snippet"
+                assert "problem" in snip, f"Missing 'problem' in {lang} snippet"
+                assert "fix_chain" in snip, f"Missing 'fix_chain' in {lang} snippet"
+
+
+class TestLanguageAwareSampling:
+    def test_sample_selector_for_python(self):
+        rng = random.Random(42)
+        sel = sample_selector_for_language(rng, "python")
+        assert isinstance(sel, str)
+        assert sel.startswith(".")
+
+    def test_sample_selector_for_go(self):
+        rng = random.Random(42)
+        found_go_name = False
+        for _ in range(100):
+            sel = sample_selector_for_language(rng, "go")
+            if any(name in sel for name in GO_FUNCTION_NAMES[:5]):
+                found_go_name = True
+                break
+        assert found_go_name
+
+    def test_sample_selector_for_typescript(self):
+        rng = random.Random(42)
+        found_ts_name = False
+        for _ in range(100):
+            sel = sample_selector_for_language(rng, "typescript")
+            if any(name in sel for name in TS_FUNCTION_NAMES[:5]):
+                found_ts_name = True
+                break
+        assert found_ts_name
+
+    def test_sample_module_path_for_go(self):
+        rng = random.Random(42)
+        path = sample_module_path_for_language(rng, "go")
+        assert ".go" in path
+
+    def test_sample_module_path_for_typescript(self):
+        rng = random.Random(42)
+        path = sample_module_path_for_language(rng, "typescript")
+        assert ".ts" in path
+
+    def test_sample_error_context(self):
+        rng = random.Random(42)
+        ctx = sample_error_context(rng)
+        assert "error" in ctx
+        assert "language" in ctx
+
+    def test_sample_code_context(self):
+        rng = random.Random(42)
+        ctx = sample_code_context(rng)
+        assert "code" in ctx
+        assert "problem" in ctx
+        assert "fix_chain" in ctx
+        assert "language" in ctx

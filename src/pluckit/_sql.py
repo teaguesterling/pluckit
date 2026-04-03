@@ -68,7 +68,9 @@ def _selector_to_where(selector: str) -> str:
 
     m = _SELECTOR_RE.match(resolved)
     if m is None:
-        # Fallback: try to match by type name directly
+        # Fallback: match by tree-sitter type name directly
+        if resolved and not resolved.startswith(":"):
+            return f"type = '{_esc(resolved)}'"
         return "1=1"
 
     cls = m.group("cls")
