@@ -265,7 +265,7 @@ operations:
   # --- Structural mutations (Selection -> Selection) ---
   mutation:
     - name: addParam
-      signature: "Selection.addParam(spec: str) -> Selection"
+      signature: "Selection.addParam(spec: str, before?: str, after?: str) -> Selection"
       input: Selection
       output: Selection
       category: mutate
@@ -358,6 +358,123 @@ operations:
       output: Selection
       category: mutate
       description: "Replace call sites with function body"
+
+  # --- Call site mutations (Selection -> Selection) ---
+  call_site_mutations:
+    - name: addArg
+      signature: "Selection.addArg(spec: str, before?: str, after?: str) -> Selection"
+      input: Selection
+      output: Selection
+      category: mutate
+      description: "Add argument to call expressions. Optional before/after for position."
+      param_examples:
+        - "timeout=30"
+        - "log_level=log_level"
+        - "retry=True"
+        - "encoding='utf-8'"
+        - "callback=on_complete"
+
+    - name: removeArg
+      signature: "Selection.removeArg(name: str) -> Selection"
+      input: Selection
+      output: Selection
+      category: mutate
+      description: "Remove argument from call expressions"
+
+    - name: replaceArg
+      signature: "Selection.replaceArg(name: str, expr: str) -> Selection"
+      input: Selection
+      output: Selection
+      category: mutate
+      description: "Change an argument's value at call sites"
+
+  # --- Class mutations (Selection -> Selection) ---
+  class_mutations:
+    - name: addMethod
+      signature: "Selection.addMethod(code: str, before?: str, after?: str) -> Selection"
+      input: Selection
+      output: Selection
+      category: mutate
+      description: "Add method to class body. Optional position via before/after method name."
+
+    - name: addProperty
+      signature: "Selection.addProperty(name: str, type?: str, default?: str) -> Selection"
+      input: Selection
+      output: Selection
+      category: mutate
+      description: "Add attribute/property to class"
+
+    - name: addBase
+      signature: "Selection.addBase(class_name: str) -> Selection"
+      input: Selection
+      output: Selection
+      category: mutate
+      description: "Add base class to class definition"
+
+  # --- Decorator mutations (Selection -> Selection) ---
+  decorator_mutations:
+    - name: addDecorator
+      signature: "Selection.addDecorator(decorator: str, before?: str, after?: str) -> Selection"
+      input: Selection
+      output: Selection
+      category: mutate
+      description: "Add decorator to function or class. Prepends (outermost) by default."
+      param_examples:
+        - "@lru_cache"
+        - "@retry(max_attempts=3)"
+        - "@pytest.mark.slow"
+        - "@staticmethod"
+        - "@classmethod"
+        - "@property"
+        - "@app.route('/api/v1')"
+        - "@override"
+        - "@deprecated"
+        - "@log_calls"
+
+    - name: removeDecorator
+      signature: "Selection.removeDecorator(name: str) -> Selection"
+      input: Selection
+      output: Selection
+      category: mutate
+      description: "Remove decorator from function or class"
+
+  # --- Import mutations (Selection -> Selection) ---
+  import_mutations:
+    - name: ensureImport
+      signature: "Selection.ensureImport(spec: str) -> Selection"
+      input: Selection
+      output: Selection
+      category: mutate
+      description: "Add import if not already present (idempotent)"
+      param_examples:
+        - "import logging"
+        - "from typing import Optional"
+        - "from pathlib import Path"
+        - "import json"
+        - "from contextlib import contextmanager"
+
+    - name: removeImport
+      signature: "Selection.removeImport(module: str) -> Selection"
+      input: Selection
+      output: Selection
+      category: mutate
+      description: "Remove import statement"
+
+  # --- Annotation mutations (Selection -> Selection) ---
+  annotation_mutations:
+    - name: annotate
+      signature: "Selection.annotate(target: str, type_str: str) -> Selection"
+      input: Selection
+      output: Selection
+      category: mutate
+      description: "Add or change type annotation on parameter or return"
+
+    - name: returnType
+      signature: "Selection.returnType(type_str: str) -> Selection"
+      input: Selection
+      output: Selection
+      category: mutate
+      description: "Set return type annotation on function"
 
   # --- Relationship operations (Selection -> Selection) ---
   relationships:
@@ -756,7 +873,12 @@ composition:
             reachable, call_chain, similar, common_pattern, refs, defs,
             resolves_to, shadows, unused_params, at, history, isolate, impact]
     mutate: [addParam, removeParam, retype, rename, prepend, append, wrap,
-             unwrap, replaceWith, remove, move_to, extract, inline, refactor]
+             unwrap, replaceWith, remove, move_to, extract, inline, refactor,
+             addArg, removeArg, replaceArg,
+             addMethod, addProperty, addBase,
+             addDecorator, removeDecorator,
+             ensureImport, removeImport,
+             annotate, returnType]
     delegate: [black, ruff_fix, isort, format, guard, test, fuzz, benchmark,
                trace, save]
     terminal: [text, attr, count, names, complexity, interface, diff, blame,
@@ -859,3 +981,15 @@ example_chains:
       chain: "select('.fn#login, .fn#logout, .fn#refresh_token').reachable(max_depth=3)"
     - intent: "compare the validation functions"
       chain: "select('.fn[name^=\"validate_\"]').compare()"
+
+  call_site_propagation:
+    - intent: "add timeout parameter to validate_token and pass it from all callers"
+      chain: "select('.fn#validate_token').addParam('timeout: int = 30').callers().find('.call#validate_token').addArg('timeout=timeout')"
+    - intent: "remove the deprecated verbose flag from process_data and all its callers"
+      chain: "select('.fn#process_data').removeParam('verbose').callers().find('.call#process_data').removeArg('verbose')"
+    - intent: "add @retry decorator to all database functions and ensure the import"
+      chain: "source('src/db/**/*.py').find('.fn:exported').addDecorator('@retry(max_attempts=3)').ensureImport('from tenacity import retry')"
+    - intent: "add type hints to all public functions in auth module"
+      chain: "source('src/auth/**/*.py').find('.fn:exported').returnType('bool')"
+    - intent: "add logging method to all service classes"
+      chain: "select('.cls[name$=\"Service\"]').addMethod('def log(self, msg: str) -> None:\\n    logger.info(f\"{self.__class__.__name__}: {msg}\")', after='__init__')"
