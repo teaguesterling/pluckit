@@ -365,6 +365,331 @@ class ChainSampler:
             "language": lang,
         }
 
+    def sample_scenario(self) -> dict:
+        """Generate a chain from a pre-built realistic scenario.
+
+        These are common developer workflows that produce multi-op chains
+        with natural intents. Each scenario is a dict with chain, intent,
+        shape, category, and optionally context and language.
+        """
+        rng = self._rng
+        scenarios = self._build_scenarios(rng)
+        return rng.choice(scenarios)
+
+    def _build_scenarios(self, rng: random.Random) -> list[dict]:
+        """Build a list of realistic scenarios with chain + intent pairs."""
+        from training.pools import (
+            FUNCTION_NAMES, CLASS_NAMES, MODULE_PATHS,
+            PARAM_SPECS, CODE_SNIPPETS, EXCEPTION_TYPES,
+            GUARD_STRATEGIES, RENAME_TARGETS, DECORATOR_SPECS,
+            IMPORT_SPECS, ARG_SPECS, TYPE_ANNOTATIONS,
+            GO_FUNCTION_NAMES, TS_FUNCTION_NAMES,
+            GO_MODULE_PATHS, TS_MODULE_PATHS,
+            sample_selector, sample_composed_selector,
+        )
+
+        fn = rng.choice(FUNCTION_NAMES)
+        fn2 = rng.choice([f for f in FUNCTION_NAMES if f != fn])
+        cls = rng.choice(CLASS_NAMES)
+        mod = rng.choice(MODULE_PATHS)
+        param = rng.choice(PARAM_SPECS)
+        param_name = param.split(":")[0].strip()
+        param_type = param.split(":")[1].split("=")[0].strip() if ":" in param else "int"
+        decorator = rng.choice(DECORATOR_SPECS)
+        imp = rng.choice(IMPORT_SPECS)
+        exc = rng.choice(EXCEPTION_TYPES)
+        strategy = rng.choice(GUARD_STRATEGIES)
+        arg = rng.choice(ARG_SPECS)
+        old_name, new_name = rng.choice(RENAME_TARGETS)
+        type_ann = rng.choice(TYPE_ANNOTATIONS)
+        code_pre = rng.choice(CODE_SNIPPETS["prepend"])
+        code_app = rng.choice(CODE_SNIPPETS["append"])
+        wrap_b = rng.choice(CODE_SNIPPETS["wrap_before"])
+        wrap_a = rng.choice(CODE_SNIPPETS["wrap_after"])
+
+        go_fn = rng.choice(GO_FUNCTION_NAMES)
+        ts_fn = rng.choice(TS_FUNCTION_NAMES)
+        go_mod = rng.choice(GO_MODULE_PATHS)
+        ts_mod = rng.choice(TS_MODULE_PATHS)
+
+        q = lambda s: f"'{s}'"  # quote helper
+
+        scenarios = [
+            # --- Parameter propagation (add param + update callers) ---
+            {
+                "chain": f"select('.fn#{fn}').addParam({q(param)}).callers().find('.call#{fn}').addArg('{param_name}={param_name}')",
+                "intent": rng.choice([
+                    f"add {param_name} parameter to {fn} and pass it from all callers",
+                    f"{fn} needs a {param_name} parameter — add it and update all call sites",
+                    f"propagate {param_name} through {fn} and its callers",
+                    f"add {param_name} to {fn} and make sure everyone passes it",
+                    f"introduce {param_name} to {fn} with caller propagation",
+                ]),
+                "shape": "select.addParam.callers.find.addArg",
+                "category": "pipeline",
+            },
+            # --- Remove parameter propagation ---
+            {
+                "chain": f"select('.fn#{fn}').removeParam('{param_name}').callers().find('.call#{fn}').removeArg('{param_name}')",
+                "intent": rng.choice([
+                    f"remove the {param_name} parameter from {fn} and clean up all callers",
+                    f"drop {param_name} from {fn} — it's unused, remove from call sites too",
+                    f"the {param_name} param in {fn} is dead, remove it everywhere",
+                ]),
+                "shape": "select.removeParam.callers.find.removeArg",
+                "category": "pipeline",
+            },
+            # --- Add decorator + ensure import ---
+            {
+                "chain": f"source({q(mod)}).find('.fn:exported').addDecorator({q(decorator)}).ensureImport({q(imp)})",
+                "intent": rng.choice([
+                    f"add {decorator} to all public functions in {mod} and make sure the import is there",
+                    f"decorate all exported functions in {mod} with {decorator}",
+                    f"every public function in {mod} needs {decorator}",
+                    f"apply {decorator} to public functions in {mod}, add the import if missing",
+                ]),
+                "shape": "source.find.addDecorator.ensureImport",
+                "category": "mutation",
+            },
+            # --- Rename + update callers ---
+            {
+                "chain": f"select('.fn#{old_name}').rename({q(new_name)}).callers().find('.call#{old_name}').replaceWith('{old_name}', '{new_name}')",
+                "intent": rng.choice([
+                    f"rename {old_name} to {new_name} everywhere — definition and all call sites",
+                    f"{old_name} is a bad name, change it to {new_name} across the codebase",
+                    f"refactor: {old_name} → {new_name}, update all references",
+                ]),
+                "shape": "select.rename.callers.find.replaceWith",
+                "category": "pipeline",
+            },
+            # --- Guard + format + test + save ---
+            {
+                "chain": f"source({q(mod)}).find('.call[name*=\"query\"]').guard({q(exc)}, {q(strategy)}).black().test().save('fix: add error handling to queries')",
+                "intent": rng.choice([
+                    f"add {exc} error handling to all query calls in {mod}, format, test, and commit",
+                    f"wrap all database queries in {mod} with {strategy} error handling, then format and save",
+                    f"the query calls in {mod} need {exc} handling — add it, run black, test, commit",
+                ]),
+                "shape": "source.find.guard.black.test.save",
+                "category": "pipeline",
+            },
+            # --- Defensive null check ---
+            {
+                "chain": f"select('.fn#{fn}').prepend('if {fn.split('_')[-1]} is None:\\n    raise ValueError(\"{fn.split('_')[-1]} is required\")')",
+                "intent": rng.choice([
+                    f"add a null check at the top of {fn}",
+                    f"{fn} doesn't handle None input — add a guard",
+                    f"add defensive validation to {fn}: raise if input is None",
+                    f"{fn} crashes on None — add a check at the start",
+                ]),
+                "shape": "select.prepend",
+                "category": "mutation",
+            },
+            # --- Find + mutate + test ---
+            {
+                "chain": f"select('.fn:exported').addParam({q(param)}).test()",
+                "intent": rng.choice([
+                    f"add {param_name} to all public functions and verify tests still pass",
+                    f"give all exported functions a {param_name} parameter, then run tests",
+                    f"I need {param_name} on every public function — add it and test",
+                ]),
+                "shape": "select.addParam.test",
+                "category": "pipeline",
+            },
+            # --- Add method to class ---
+            {
+                "chain": f"select('.cls#{cls}').addMethod('def __repr__(self) -> str:\\n    return f\"{{self.__class__.__name__}}\"', after='__init__')",
+                "intent": rng.choice([
+                    f"add a __repr__ method to the {cls} class",
+                    f"{cls} needs a __repr__ — add it after __init__",
+                    f"give {cls} a string representation method",
+                    f"implement __repr__ on {cls}",
+                ]),
+                "shape": "select.addMethod",
+                "category": "mutation",
+            },
+            # --- Wrap all calls in a module ---
+            {
+                "chain": f"source({q(mod)}).find('.call[name*=\"query\"]').wrap({q(wrap_b)}, {q(wrap_a)})",
+                "intent": rng.choice([
+                    f"wrap all query calls in {mod} with {wrap_b}",
+                    f"all database calls in {mod} need to be inside {wrap_b}",
+                    f"surround query calls in {mod} with error handling",
+                ]),
+                "shape": "source.find.wrap",
+                "category": "mutation",
+            },
+            # --- Two-arg replaceWith (scoped) ---
+            {
+                "chain": f"select('.fn#{fn}').replaceWith('return None', 'raise ValueError(\"invalid\")')",
+                "intent": rng.choice([
+                    f"{fn} returns None when it should raise — fix it",
+                    f"replace the silent None return in {fn} with a ValueError",
+                    f"the return None in {fn} is wrong, it should raise ValueError",
+                    f"fix: {fn} silently returns None instead of raising",
+                ]),
+                "shape": "select.replaceWith",
+                "category": "mutation",
+            },
+            # --- Complex query ---
+            {
+                "chain": f"select('.fn').filter(fn: fn.complexity() > 10).filter(fn: fn.callers().count() == 0).names()",
+                "intent": rng.choice([
+                    "find complex dead code — functions with high complexity but no callers",
+                    "which complex functions have zero callers? list their names",
+                    "show names of complicated functions that nobody calls",
+                    "find functions that are both complex and unused",
+                ]),
+                "shape": "select.filter.filter.names",
+                "category": "terminal",
+            },
+            # --- Find and count across files ---
+            {
+                "chain": f"source({q(mod)}).find('.fn:exported').count()",
+                "intent": rng.choice([
+                    f"how many public functions are in {mod}",
+                    f"count the exported functions in {mod}",
+                    f"how large is the public API surface of {mod}",
+                ]),
+                "shape": "source.find.count",
+                "category": "terminal",
+            },
+            # --- History comparison ---
+            {
+                "chain": f"select('.fn#{fn}').diff(select('.fn#{fn}').at('last_green_build'))",
+                "intent": rng.choice([
+                    f"what changed in {fn} since the last green build",
+                    f"show me what's different in {fn} compared to the last passing CI",
+                    f"diff {fn} against the last known good version",
+                    f"why is {fn} broken? show what changed since it last worked",
+                ]),
+                "shape": "select.diff",
+                "category": "terminal",
+            },
+            # --- Pattern replacement across codebase ---
+            {
+                "chain": f"select('.call#print').replaceWith('print', 'logger.info')",
+                "intent": rng.choice([
+                    "replace all print() calls with logger.info()",
+                    "convert print statements to logging",
+                    "stop using print — switch to logger.info everywhere",
+                    "migrate from print to logger.info across the codebase",
+                ]),
+                "shape": "select.replaceWith",
+                "category": "mutation",
+            },
+            # --- Go: add context parameter ---
+            {
+                "chain": f"source({q(go_mod)}).find('.fn:exported').addParam('ctx context.Context', before='*').ensureImport('context')",
+                "intent": rng.choice([
+                    f"add context.Context as first parameter to all exported Go functions in {go_mod}",
+                    f"every exported function in {go_mod} needs a ctx context.Context",
+                    f"propagate context.Context through the public API in {go_mod}",
+                ]),
+                "shape": "source.find.addParam.ensureImport",
+                "category": "mutation",
+                "language": "go",
+            },
+            # --- TypeScript: fix any types ---
+            {
+                "chain": f"source({q(ts_mod)}).find('.fn:exported').returnType({q(type_ann)})",
+                "intent": rng.choice([
+                    f"add return type annotations to all exported functions in {ts_mod}",
+                    f"fix the missing return types in {ts_mod}",
+                    f"every exported function in {ts_mod} should have a return type",
+                    f"type-annotate the return values in {ts_mod}",
+                ]),
+                "shape": "source.find.returnType",
+                "category": "mutation",
+                "language": "typescript",
+            },
+            # --- Find callers and understand blast radius ---
+            {
+                "chain": f"select('.fn#{fn}').callers().names()",
+                "intent": rng.choice([
+                    f"who calls {fn}? list them",
+                    f"show me every function that calls {fn}",
+                    f"I need to know what calls {fn} before I change it",
+                    f"what's the blast radius of changing {fn}",
+                    f"list all callers of {fn}",
+                ]),
+                "shape": "select.callers.names",
+                "category": "terminal",
+            },
+            # --- Remove deprecated code ---
+            {
+                "chain": f"select('.fn:decorated(deprecated)').remove()",
+                "intent": rng.choice([
+                    "remove all deprecated functions",
+                    "clean up: delete everything marked @deprecated",
+                    "nuke all the deprecated functions",
+                    "strip out deprecated code",
+                ]),
+                "shape": "select.remove",
+                "category": "mutation",
+            },
+            # --- Add logging to all handlers ---
+            {
+                "chain": f"source({q(mod)}).find('.fn:exported').prepend({q(code_pre)}).ensureImport('import logging')",
+                "intent": rng.choice([
+                    f"add logging to all public functions in {mod}",
+                    f"every exported function in {mod} should log on entry",
+                    f"inject logging at the top of all public functions in {mod}",
+                ]),
+                "shape": "source.find.prepend.ensureImport",
+                "category": "mutation",
+            },
+            # --- Find similar and refactor ---
+            {
+                "chain": f"select('.fn[name^=\"validate_\"]').similar(0.7).refactor('validate_common')",
+                "intent": rng.choice([
+                    "the validate_* functions are too similar — extract the common pattern",
+                    "find similar validation functions and consolidate them",
+                    "refactor the validate_ family into a shared function",
+                    "DRY up the validate_* functions — they're mostly duplicates",
+                ]),
+                "shape": "select.similar.refactor",
+                "category": "mutation",
+            },
+            # --- Ancestor navigation pattern ---
+            {
+                "chain": f"source({q(mod)}).find('return_statement').containing('None').ancestor('.fn').names()",
+                "intent": rng.choice([
+                    f"which functions in {mod} return None? list them",
+                    f"find all functions in {mod} that have a bare return None",
+                    f"show me functions in {mod} with None returns",
+                ]),
+                "shape": "source.find.containing.ancestor.names",
+                "category": "terminal",
+            },
+            # --- Containing + replaceWith (error fix pattern) ---
+            {
+                "chain": f"select('.fn#{fn}').containing('return None').replaceWith('return None', 'raise ValueError(\"expected return value\")')",
+                "intent": rng.choice([
+                    f"{fn} has a return None that should be an error",
+                    f"fix the silent None return in {fn}",
+                    f"the return None in {fn} is a bug — it should raise",
+                    f"convert the None return in {fn} to a ValueError",
+                ]),
+                "shape": "select.containing.replaceWith",
+                "category": "mutation",
+            },
+            # --- Test-driven: find untested code ---
+            {
+                "chain": f"select('.fn:exported').filter(fn: fn.coverage() < 0.5).filter(fn: fn.complexity() > 10).names()",
+                "intent": rng.choice([
+                    "find complex undertested public functions",
+                    "which exported functions are both complex and poorly tested",
+                    "show me the riskiest code — complex and low coverage",
+                    "find public functions where coverage < 50% and complexity > 10",
+                ]),
+                "shape": "select.filter.filter.names",
+                "category": "terminal",
+            },
+        ]
+
+        return scenarios
+
     def _categorize_chain(self, categories: list[str]) -> str:
         """Determine chain category from list of operation categories.
 

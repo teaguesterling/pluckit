@@ -340,3 +340,47 @@ class TestMultilangSampling:
             pair = sampler.sample_multilang()
             languages.add(pair["language"])
         assert len(languages) >= 2
+
+
+# ---------------------------------------------------------------------------
+# Scenario sampling
+# ---------------------------------------------------------------------------
+
+class TestScenarioSampling:
+    def test_returns_required_fields(self, sampler):
+        pair = sampler.sample_scenario()
+        assert "chain" in pair
+        assert "intent" in pair
+        assert "shape" in pair
+        assert "category" in pair
+
+    def test_intent_is_natural(self, sampler):
+        pair = sampler.sample_scenario()
+        # Intent should not contain template placeholders like {selector}
+        assert "{" not in pair["intent"]
+
+    def test_produces_variety(self, sampler):
+        intents = set()
+        for _ in range(50):
+            pair = sampler.sample_scenario()
+            intents.add(pair["intent"])
+        # Should produce many distinct intents (names vary)
+        assert len(intents) >= 20
+
+    def test_produces_multi_op_chains(self, sampler):
+        found_multi = False
+        for _ in range(50):
+            pair = sampler.sample_scenario()
+            if len(pair["shape"].split(".")) >= 3:
+                found_multi = True
+                break
+        assert found_multi
+
+    def test_some_have_language(self, sampler):
+        found_lang = False
+        for _ in range(50):
+            pair = sampler.sample_scenario()
+            if "language" in pair:
+                found_lang = True
+                break
+        assert found_lang

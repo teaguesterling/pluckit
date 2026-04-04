@@ -101,24 +101,21 @@ def main(argv: list[str] | None = None) -> None:
             total += 1
 
         # 2. Synthetic pairs
-        # Distribution: 40% standard, 20% multi-language, 20% error-driven, 20% code-contextual
+        # Distribution: 10% error-driven, 7% code-contextual, 13% multi-language,
+        #               25% scenario-driven, 45% standard
         for i in range(args.count):
             roll = rng.random()
 
-            if roll < 0.20:
-                # 20% error-driven
+            if roll < 0.10:
+                # 10% error-driven
                 pair = sampler.sample_error_driven()
-                intent = generate_error_intent(pair["context"], rng)
-                intent_result = {"intent": intent, "strategy": "template"}
-            elif roll < 0.40:
-                # 20% code-contextual
+                intent_result = {"intent": pair["intent"], "strategy": "template"}
+            elif roll < 0.17:
+                # 7% code-contextual
                 pair = sampler.sample_code_contextual()
-                intent = generate_code_context_intent(
-                    pair["context"], pair.get("intent", pair.get("category", "fix issue")), rng
-                )
-                intent_result = {"intent": intent, "strategy": "template"}
-            elif roll < 0.60:
-                # 20% multi-language
+                intent_result = {"intent": pair["intent"], "strategy": "template"}
+            elif roll < 0.30:
+                # 13% multi-language
                 pair = sampler.sample_multilang()
                 intent_result = generate_intent(
                     chain=pair["chain"],
@@ -129,8 +126,12 @@ def main(argv: list[str] | None = None) -> None:
                     paraphrase_ratio=args.paraphrase_ratio,
                     reverse_ratio=args.reverse_ratio,
                 )
+            elif roll < 0.55:
+                # 25% scenario-driven (realistic multi-op chains)
+                pair = sampler.sample_scenario()
+                intent_result = {"intent": pair["intent"], "strategy": "template"}
             else:
-                # 40% standard Python chains (existing behavior)
+                # 45% standard random
                 pair = sampler.sample()
                 intent_result = generate_intent(
                     chain=pair["chain"],
