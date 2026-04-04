@@ -17,7 +17,7 @@ from pluckit._sql import _esc, _selector_to_where, descendant_join, read_ast_sql
 from pluckit.types import NodeInfo
 
 if TYPE_CHECKING:
-    from pluckit.context import Context
+    from pluckit._context import _Context as Context
 
 # Counter for unique temp view names
 _view_counter = itertools.count()

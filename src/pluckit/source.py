@@ -6,7 +6,7 @@ import os
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from pluckit.context import Context
+    from pluckit._context import _Context as Context
     from pluckit.selection import Selection
 
 

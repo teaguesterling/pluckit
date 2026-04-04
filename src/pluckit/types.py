@@ -43,3 +43,8 @@ class InterfaceInfo:
     reads: list[str]
     writes: list[str]
     calls: list[str]
+
+
+class PluckerError(Exception):
+    """Raised when a Plucker operation cannot be completed."""
+    pass
