@@ -10,6 +10,8 @@ training/raw_pairs.jsonl
 training/valid_pairs.jsonl
 training/rejected.jsonl
 training/training.jsonl
+training/training_chat.jsonl
+training/training_completion.jsonl
 training/train.jsonl
 training/val.jsonl
 training/system_prompt.txt
