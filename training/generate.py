@@ -14,6 +14,7 @@ from pathlib import Path
 from training.spec import load_spec
 from training.chain_sampler import ChainSampler
 from training.intent import generate_intent, generate_error_intent, generate_code_context_intent
+from training.dynamic_errors import generate_parametric_error
 
 
 def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
@@ -101,21 +102,25 @@ def main(argv: list[str] | None = None) -> None:
             total += 1
 
         # 2. Synthetic pairs
-        # Distribution: 10% error-driven, 7% code-contextual, 13% multi-language,
-        #               25% scenario-driven, 45% standard
+        # Distribution: 20% parametric error, 5% fixed error, 5% code-contextual,
+        #               10% multi-language, 25% scenario-driven, 35% standard
         for i in range(args.count):
             roll = rng.random()
 
-            if roll < 0.10:
-                # 10% error-driven
+            if roll < 0.20:
+                # 20% parametric error-driven (high uniqueness)
+                pair = generate_parametric_error(rng)
+                intent_result = {"intent": pair["intent"], "strategy": "template"}
+            elif roll < 0.25:
+                # 5% fixed-pool error-driven
                 pair = sampler.sample_error_driven()
                 intent_result = {"intent": pair["intent"], "strategy": "template"}
-            elif roll < 0.17:
-                # 7% code-contextual
+            elif roll < 0.30:
+                # 5% code-contextual
                 pair = sampler.sample_code_contextual()
                 intent_result = {"intent": pair["intent"], "strategy": "template"}
-            elif roll < 0.30:
-                # 13% multi-language
+            elif roll < 0.40:
+                # 10% multi-language
                 pair = sampler.sample_multilang()
                 intent_result = generate_intent(
                     chain=pair["chain"],
@@ -126,12 +131,12 @@ def main(argv: list[str] | None = None) -> None:
                     paraphrase_ratio=args.paraphrase_ratio,
                     reverse_ratio=args.reverse_ratio,
                 )
-            elif roll < 0.55:
+            elif roll < 0.65:
                 # 25% scenario-driven (realistic multi-op chains)
                 pair = sampler.sample_scenario()
                 intent_result = {"intent": pair["intent"], "strategy": "template"}
             else:
-                # 45% standard random
+                # 35% standard random
                 pair = sampler.sample()
                 intent_result = generate_intent(
                     chain=pair["chain"],
