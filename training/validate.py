@@ -144,16 +144,110 @@ def validate_chain(chain_str: str, spec: Spec) -> ChainValidationResult:
         current_type = output_type
 
     # --- Post-chain checks / warnings ---
-    # Warn if save() was called without any preceding mutation
     op_names = [op.name for op in ops]
+
+    # Warn if save() was called without any preceding mutation
     if "save" in op_names and not mutation_occurred:
         warnings.append("save() called without any preceding mutation — nothing may have changed")
+
+    # --- Plausibility checks ---
+    # Reject chains that are type-valid but semantically nonsensical
+    implausibility = _check_plausibility(ops)
+    if implausibility:
+        return ChainValidationResult(valid=False, error=f"Implausible: {implausibility}")
 
     return ChainValidationResult(
         valid=True,
         warnings=warnings,
         output_type=current_type,
     )
+
+
+# -- Mutation targets: node types where mutations make sense --
+_MUTABLE_NODE_TYPES = {
+    ".fn", ".cls", ".call", ".if", ".for", ".while", ".try", ".except",
+    ".with", ".assign", ".import", ".dec", ".block", ".ret",
+    # Taxonomy forms
+    ".def-func", ".def-class", ".access-call", ".flow-cond", ".flow-loop",
+    ".error-try", ".error-catch", ".statement-assign", ".external-import",
+    "function_definition", "class_definition",
+}
+
+# Node types where mutations are nonsensical
+_IMMUTABLE_NODE_TYPES = {
+    ".comment", ".str", ".num", ".arg",
+    ".metadata-comment", ".literal-str", ".literal-num",
+}
+
+# Operations that only make sense on function-like targets
+_FUNCTION_OPS = {
+    "addParam", "removeParam", "addDecorator", "removeDecorator",
+    "returnType", "callers", "callees",
+}
+
+# Operations that only make sense on class-like targets
+_CLASS_OPS = {"addMethod", "addProperty", "addBase"}
+
+# Operations that only make sense on call-like targets
+_CALL_OPS = {"addArg", "removeArg", "replaceArg"}
+
+
+def _extract_selector_node_type(args: list[str]) -> str | None:
+    """Extract the primary node type from a selector argument."""
+    if not args:
+        return None
+    sel = args[0].strip("'\"")
+    # Match leading .word or word (bare type)
+    import re
+    m = re.match(r'(\.\w+)', sel)
+    return m.group(1) if m else None
+
+
+def _check_plausibility(ops: list) -> str | None:
+    """Check for semantically nonsensical operation combinations.
+
+    Returns an error message string if implausible, None if OK.
+    """
+    # Get the initial selector's node type
+    entry_node_type = _extract_selector_node_type(ops[0].args) if ops else None
+
+    for i, op in enumerate(ops[1:], start=1):
+        # Mutations on immutable node types
+        if op.name in (
+            "guard", "wrap", "prepend", "append", "addParam", "removeParam",
+            "rename", "replaceWith", "remove", "addDecorator", "removeDecorator",
+            "addMethod", "addProperty", "addBase", "addArg", "removeArg",
+            "extract", "inline", "refactor",
+        ):
+            # Check if we're operating on a nonsensical target
+            # Use the most recent find/select selector
+            target_type = entry_node_type
+            for j in range(i - 1, -1, -1):
+                if ops[j].name in ("find", "select", "source"):
+                    target_type = _extract_selector_node_type(ops[j].args)
+                    break
+
+            if target_type in _IMMUTABLE_NODE_TYPES:
+                return f"{op.name}() on {target_type} — mutations don't make sense on {target_type}"
+
+        # Function-only operations on non-function targets
+        if op.name in _FUNCTION_OPS and entry_node_type:
+            # If the entry selector is clearly not a function
+            if entry_node_type in (".str", ".num", ".comment", ".import"):
+                return f"{op.name}() on {entry_node_type} — only makes sense on functions"
+
+        # Class-only operations on non-class targets
+        if op.name in _CLASS_OPS and entry_node_type:
+            if entry_node_type not in (".cls", ".class", ".def-class"):
+                # Not necessarily wrong (could have .find('.cls') later), but warn-worthy
+                pass
+
+        # Call-only operations on non-call targets
+        if op.name in _CALL_OPS and entry_node_type:
+            if entry_node_type in (".str", ".num", ".comment"):
+                return f"{op.name}() on {entry_node_type} — only makes sense on call expressions"
+
+    return None
 
 
 # ---------------------------------------------------------------------------

@@ -146,3 +146,42 @@ class TestWarnings:
         assert result.valid is True
         mutation_warn = [w for w in result.warnings if "mutation" in w.lower() or "save" in w.lower()]
         assert len(mutation_warn) == 0
+
+
+class TestPlausibility:
+    def test_guard_on_comment_rejected(self, spec):
+        result = validate_chain("select('.comment').guard('ValueError', 'log')", spec)
+        assert not result.valid
+        assert "implausible" in result.error.lower() or "comment" in result.error.lower()
+
+    def test_addparam_on_string_rejected(self, spec):
+        result = validate_chain("select('.str').addParam('x: int')", spec)
+        assert not result.valid
+
+    def test_addarg_on_comment_rejected(self, spec):
+        result = validate_chain("select('.comment').addArg('x=1')", spec)
+        assert not result.valid
+
+    def test_wrap_on_number_rejected(self, spec):
+        result = validate_chain("select('.num').wrap('try:', 'except: pass')", spec)
+        assert not result.valid
+
+    def test_callers_on_string_rejected(self, spec):
+        result = validate_chain("select('.str').callers()", spec)
+        assert not result.valid
+
+    def test_guard_on_function_accepted(self, spec):
+        result = validate_chain("select('.fn').guard('ValueError', 'log')", spec)
+        assert result.valid
+
+    def test_addparam_on_function_accepted(self, spec):
+        result = validate_chain("select('.fn:exported').addParam('x: int = 0')", spec)
+        assert result.valid
+
+    def test_rename_on_function_accepted(self, spec):
+        result = validate_chain("select('.fn#old').rename('new')", spec)
+        assert result.valid
+
+    def test_wrap_on_call_accepted(self, spec):
+        result = validate_chain("select('.call#query').wrap('try:', 'except: pass')", spec)
+        assert result.valid
