@@ -118,15 +118,34 @@ class ChainSampler:
         rng:  Optional ``random.Random`` instance for reproducibility.
     """
 
-    def __init__(self, spec: Spec, rng: random.Random | None = None) -> None:
+    def __init__(
+        self,
+        spec: Spec,
+        rng: random.Random | None = None,
+        *,
+        implemented_weight: float = 0.8,
+    ) -> None:
         self._spec = spec
         self._rng = rng if rng is not None else random.Random()
+        self._impl_weight = implemented_weight
+
         # Pre-build category → ops mapping for Selection
         self._selection_ops: dict[str, list[str]] = {}
+        # Per-op weights: implemented ops get higher weight than planned
+        self._selection_op_weights: dict[str, list[float]] = {}
         selection_comp = spec.composition.get("Selection", {})
         if isinstance(selection_comp, dict):
             for cat, ops in selection_comp.items():
                 self._selection_ops[cat] = list(ops)
+                weights = []
+                for op_name in ops:
+                    op_def = spec.operations.get(op_name)
+                    if op_def and op_def.status == "planned":
+                        weights.append(1.0 - implemented_weight)
+                    else:
+                        weights.append(implemented_weight)
+                self._selection_op_weights[cat] = weights
+
         # Source ops (only 'find' per spec)
         self._source_ops: list[str] = list(spec.composition.get("Source", []))
         # History ops
@@ -755,7 +774,13 @@ class ChainSampler:
             cats = list(available_cats.keys())
             weights = [available_cats[c] for c in cats]
             chosen_cat = self._rng.choices(cats, weights=weights, k=1)[0]
-            op_name = self._rng.choice(self._selection_ops[chosen_cat])
+            # Weight toward implemented ops (80%) vs planned (20%)
+            cat_ops = self._selection_ops[chosen_cat]
+            cat_weights = self._selection_op_weights.get(chosen_cat)
+            if cat_weights and len(cat_weights) == len(cat_ops):
+                op_name = self._rng.choices(cat_ops, weights=cat_weights, k=1)[0]
+            else:
+                op_name = self._rng.choice(cat_ops)
             return op_name, chosen_cat
 
         if current_type == "History":
