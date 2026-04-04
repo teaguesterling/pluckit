@@ -3,8 +3,13 @@
 from __future__ import annotations
 
 import os
+from typing import TYPE_CHECKING
 
 import duckdb
+
+if TYPE_CHECKING:
+    from pluckit.source import Source
+    from pluckit.selection import Selection
 
 
 class _Context:
@@ -38,6 +43,17 @@ class _Context:
                 self.db.sql(f"INSTALL {ext} FROM community")
                 self.db.sql(f"LOAD {ext}")
         self._extensions_loaded = True
+
+    def source(self, glob: str) -> Source:
+        """Create a Source from a glob pattern relative to this repo."""
+        from pluckit.source import Source
+        return Source(glob, self)
+
+    def select(self, selector: str) -> Selection:
+        """Select AST nodes from the repo root."""
+        from pluckit.source import Source
+        glob = os.path.join(self.repo, "**/*.py")
+        return Source(glob, self).find(selector)
 
     def __enter__(self) -> _Context:
         return self

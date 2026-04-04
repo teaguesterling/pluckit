@@ -357,8 +357,26 @@ class Selection:
     # ---------------------------------------------------------------
 
     def containing(self, text: str) -> Selection:
-        """Filter to nodes whose peek contains the given text."""
-        return self.filter_sql(f"peek LIKE '%{_esc(text)}%'")
+        """Filter to nodes whose full source text contains the given string."""
+        view = self._register("cont")
+        try:
+            rows = self._ctx.db.sql(
+                f"SELECT node_id, file_path, start_line, end_line FROM {view}"
+            ).fetchall()
+        finally:
+            self._unregister(view)
+        matching_ids = []
+        for node_id, file_path, start_line, end_line in rows:
+            src = self._ctx.db.sql(
+                f"SELECT ast_get_source('{_esc(file_path)}', "
+                f"{start_line}, {end_line})"
+            ).fetchone()
+            if src and src[0] and text in src[0]:
+                matching_ids.append(node_id)
+        if not matching_ids:
+            return self.filter_sql("1 = 0")
+        ids_str = ", ".join(str(i) for i in matching_ids)
+        return self.filter_sql(f"node_id IN ({ids_str})")
 
     def at_line(self, line: int) -> Selection:
         """Filter to nodes that span the given line number."""

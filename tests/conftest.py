@@ -1,8 +1,6 @@
-# tests/conftest.py
 """Shared fixtures for pluckit tests."""
 import textwrap
 from pathlib import Path
-
 import pytest
 
 
@@ -66,6 +64,13 @@ def sample_dir(tmp_path):
 
 @pytest.fixture
 def ctx(sample_dir):
-    """Create a pluckit Context rooted at the sample directory."""
-    from pluckit.context import Context
-    return Context(repo=str(sample_dir))
+    """Create a pluckit _Context rooted at the sample directory (for low-level tests)."""
+    from pluckit._context import _Context
+    return _Context(repo=str(sample_dir))
+
+
+@pytest.fixture
+def pluck(sample_dir):
+    """Create a Plucker rooted at the sample directory."""
+    from pluckit import Plucker
+    return Plucker(code=str(sample_dir / "src/**/*.py"))
