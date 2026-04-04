@@ -88,6 +88,21 @@ class TestOperations:
             assert isinstance(op.category, str), f"category missing for {name}"
             assert isinstance(op.signature, str), f"signature missing for {name}"
 
+    def test_operation_has_status_field(self, spec):
+        for name, op in spec.operations.items():
+            assert op.status in ("implemented", "planned"), f"bad status for {name}: {op.status}"
+
+    def test_planned_ops_marked(self, spec):
+        planned = [name for name, op in spec.operations.items() if op.status == "planned"]
+        assert "addArg" in planned
+        assert "addMethod" in planned
+        assert "ensureImport" in planned
+
+    def test_implemented_ops_default(self, spec):
+        assert spec.operations["select"].status == "implemented"
+        assert spec.operations["find"].status == "implemented"
+        assert spec.operations["addParam"].status == "implemented"
+
     def test_loads_query_ops(self, spec):
         for op_name in ["find", "filter", "not_", "unique", "parent", "children"]:
             assert op_name in spec.operations, f"{op_name} not found"

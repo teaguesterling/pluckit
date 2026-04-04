@@ -29,6 +29,7 @@ class Operation:
     name: str
     signature: str
     category: str
+    status: str = "implemented"  # "implemented" or "planned"
     input_type: str | None = None
     output_type: str | None = None
     description: str | None = None
@@ -100,6 +101,7 @@ def _parse_operation(raw: dict) -> Operation:
         name=raw["name"],
         signature=raw["signature"],
         category=raw["category"],
+        status=raw.get("status", "implemented"),
         input_type=raw.get("input"),
         output_type=output_type,
         description=raw.get("description"),

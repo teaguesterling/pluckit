@@ -97,6 +97,11 @@ selectors:
 # =============================================================================
 # Operations
 # =============================================================================
+# Status convention:
+#   Operations without a status field are "implemented" (default).
+#   Operations with "status: planned" are in the training data but not yet
+#   in the pluckit runtime. The training generator uses both; the runtime
+#   checks status at execution time.
 operations:
 
   # --- Entry points ---
@@ -129,6 +134,7 @@ operations:
       description: "Find nodes matching selector within the source files"
 
     - name: ensureImport
+      status: planned
       signature: "Source.ensureImport(spec: str) -> Source"
       input: Source
       output: Source
@@ -142,6 +148,7 @@ operations:
         - "from contextlib import contextmanager"
 
     - name: removeImport
+      status: planned
       signature: "Source.removeImport(module: str) -> Source"
       input: Source
       output: Source
@@ -412,6 +419,7 @@ operations:
   # --- Call site mutations (Selection -> Selection) ---
   call_site_mutations:
     - name: addArg
+      status: planned
       signature: "Selection.addArg(spec: str, before?: str, after?: str) -> Selection"
       input: Selection
       output: Selection
@@ -425,6 +433,7 @@ operations:
         - "callback=on_complete"
 
     - name: removeArg
+      status: planned
       signature: "Selection.removeArg(name: str) -> Selection"
       input: Selection
       output: Selection
@@ -434,6 +443,7 @@ operations:
   # --- Decorator mutations (Selection -> Selection) ---
   decorator_mutations:
     - name: addDecorator
+      status: planned
       signature: "Selection.addDecorator(decorator: str, before?: str, after?: str) -> Selection"
       input: Selection
       output: Selection
@@ -452,6 +462,7 @@ operations:
         - "@log_calls"
 
     - name: removeDecorator
+      status: planned
       signature: "Selection.removeDecorator(name: str) -> Selection"
       input: Selection
       output: Selection
@@ -461,6 +472,7 @@ operations:
   # --- Annotation mutations (Selection -> Selection) ---
   annotation_mutations:
     - name: annotate
+      status: planned
       signature: "Selection.annotate(target: str, type_str: str) -> Selection"
       input: Selection
       output: Selection
@@ -468,6 +480,7 @@ operations:
       description: "Add or change type annotation on parameter or return type"
 
     - name: returnType
+      status: planned
       signature: "Selection.returnType(type_str: str) -> Selection"
       input: Selection
       output: Selection
@@ -477,6 +490,7 @@ operations:
   # --- Class mutations (Selection -> Selection) ---
   class_mutations:
     - name: addMethod
+      status: planned
       signature: "Selection.addMethod(code: str, before?: str, after?: str) -> Selection"
       input: Selection
       output: Selection
@@ -484,6 +498,7 @@ operations:
       description: "Add method to class body. Optional position via before/after method name."
 
     - name: addProperty
+      status: planned
       signature: "Selection.addProperty(name: str, type?: str, default?: str) -> Selection"
       input: Selection
       output: Selection
@@ -491,6 +506,7 @@ operations:
       description: "Add attribute/property to class"
 
     - name: addBase
+      status: planned
       signature: "Selection.addBase(class_name: str) -> Selection"
       input: Selection
       output: Selection
@@ -500,6 +516,7 @@ operations:
   # --- Call site mutations (Selection -> Selection) ---
   call_site_mutations:
     - name: addArg
+      status: planned
       signature: "Selection.addArg(spec: str, before?: str, after?: str) -> Selection"
       input: Selection
       output: Selection
@@ -513,6 +530,7 @@ operations:
         - "callback=on_complete"
 
     - name: removeArg
+      status: planned
       signature: "Selection.removeArg(name: str) -> Selection"
       input: Selection
       output: Selection
@@ -520,6 +538,7 @@ operations:
       description: "Remove argument from call expressions"
 
     - name: replaceArg
+      status: planned
       signature: "Selection.replaceArg(name: str, expr: str) -> Selection"
       input: Selection
       output: Selection
