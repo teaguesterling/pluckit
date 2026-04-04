@@ -705,6 +705,222 @@ class ChainSampler:
                 "shape": "select.filter.filter.names",
                 "category": "terminal",
             },
+            # ============================================================
+            # Selector-powered scenarios (using new sitting_duck features)
+            # ============================================================
+
+            # --- Dead code detection ---
+            {
+                "chain": "select('.func:named:unreferenced').names()",
+                "intent": rng.choice([
+                    "find all dead code — functions nobody calls",
+                    "list unused functions",
+                    "which functions are never referenced",
+                    "show me dead code",
+                    "find functions that can be safely deleted",
+                ]),
+                "shape": "select.names",
+                "category": "terminal",
+            },
+            # --- Callers via fluent ---
+            {
+                "chain": f"select('.fn#{fn}').callers().names()",
+                "intent": rng.choice([
+                    f"who calls {fn}",
+                    f"find callers of {fn}",
+                    f"list everything that calls {fn}",
+                ]),
+                "shape": "select.callers.names",
+                "category": "terminal",
+            },
+            # --- Callers via pseudo-element ---
+            {
+                "chain": f"select('.fn#{fn}::callers').names()",
+                "intent": rng.choice([
+                    f"who calls {fn}",
+                    f"show everything that invokes {fn}",
+                ]),
+                "shape": "select.names",
+                "category": "terminal",
+            },
+            # --- Callees via fluent ---
+            {
+                "chain": f"select('.fn#{fn}').callees().names()",
+                "intent": rng.choice([
+                    f"what does {fn} call",
+                    f"list callees of {fn}",
+                    f"which functions does {fn} invoke",
+                ]),
+                "shape": "select.callees.names",
+                "category": "terminal",
+            },
+            # --- Callees via pseudo-element ---
+            {
+                "chain": f"select('.fn#{fn}::callees').names()",
+                "intent": rng.choice([
+                    f"show dependencies of {fn}",
+                    f"list what {fn} invokes",
+                ]),
+                "shape": "select.names",
+                "category": "terminal",
+            },
+            # --- :calls pseudo-class ---
+            {
+                "chain": f"select('.func:calls({fn})').names()",
+                "intent": rng.choice([
+                    f"find all functions that call {fn}",
+                    f"which functions use {fn}",
+                    f"show everything that depends on {fn}",
+                ]),
+                "shape": "select.names",
+                "category": "terminal",
+            },
+            # --- :matches for structural patterns ---
+            {
+                "chain": "select('.func:matches(\"return None\")').names()",
+                "intent": rng.choice([
+                    "find all functions that return None",
+                    "which functions have a return None",
+                    "list functions with bare None returns",
+                ]),
+                "shape": "select.names",
+                "category": "terminal",
+            },
+            {
+                "chain": "select('.func:matches(\"db.execute()\"):not(:has(.try))').names()",
+                "intent": rng.choice([
+                    "find database calls without error handling",
+                    "which functions call db.execute without try/except",
+                    "unprotected database queries",
+                ]),
+                "shape": "select.names",
+                "category": "terminal",
+            },
+            {
+                "chain": "select('.func:matches(\"print()\")').find('.call#print').replaceWith('print', 'logger.info')",
+                "intent": rng.choice([
+                    "replace all print() with logger.info()",
+                    "migrate from print to logging",
+                    "convert print statements to logger calls",
+                ]),
+                "shape": "select.find.replaceWith",
+                "category": "mutation",
+            },
+            # --- :scope for precision ---
+            {
+                "chain": "select('return_statement:scope(function)').count()",
+                "intent": rng.choice([
+                    "count return statements scoped to their direct function",
+                    "how many returns, not counting nested functions",
+                ]),
+                "shape": "select.count",
+                "category": "terminal",
+            },
+            # --- :calls + mutation ---
+            {
+                "chain": f"select('.func:calls({fn})').addParam({q(param)})",
+                "intent": rng.choice([
+                    f"add {param_name} to every function that calls {fn}",
+                    f"all callers of {fn} need a {param_name} parameter",
+                ]),
+                "shape": "select.addParam",
+                "category": "mutation",
+            },
+            # --- Exported but uncalled ---
+            {
+                "chain": "select('.func:exported:not(:is-called)').names()",
+                "intent": rng.choice([
+                    "find exported functions nobody calls",
+                    "dead public API — exported but unused",
+                    "which public functions have no callers",
+                ]),
+                "shape": "select.names",
+                "category": "terminal",
+            },
+            # --- Unused imports ---
+            {
+                "chain": "select('.import:unreferenced').remove()",
+                "intent": rng.choice([
+                    "remove all unused imports",
+                    "clean up unreferenced imports",
+                    "delete imports that aren't used",
+                ]),
+                "shape": "select.remove",
+                "category": "mutation",
+            },
+            # --- :matches + fix ---
+            {
+                "chain": "select('.func:matches(\"except Exception\")').find('.except').replaceWith('except Exception:', 'except ValueError as e:')",
+                "intent": rng.choice([
+                    "narrow bare except Exception to ValueError",
+                    "replace generic except with specific exception type",
+                ]),
+                "shape": "select.find.replaceWith",
+                "category": "mutation",
+            },
+            # --- Cross-file :calls + guard ---
+            {
+                "chain": f"source({q(mod)}).find('.func:calls(execute):not(:has(.try))').guard('{exc}', '{strategy}')",
+                "intent": rng.choice([
+                    f"add error handling to functions in {mod} that call execute",
+                    f"wrap unprotected execute calls in {mod} with {strategy}",
+                ]),
+                "shape": "source.find.guard",
+                "category": "mutation",
+            },
+            # --- ::parent-definition navigation ---
+            {
+                "chain": f"select('.call#{fn}::parent-definition').text()",
+                "intent": rng.choice([
+                    f"show the function containing the call to {fn}",
+                    f"which function is {fn} called from",
+                ]),
+                "shape": "select.text",
+                "category": "terminal",
+            },
+            # --- :matches wildcard ---
+            {
+                "chain": "select('.func:matches(\"self.___ = ___\")').names()",
+                "intent": rng.choice([
+                    "find methods that assign to self attributes",
+                    "which methods set instance variables",
+                ]),
+                "shape": "select.names",
+                "category": "terminal",
+            },
+            # --- Route handlers ---
+            {
+                "chain": "select('.func[annotation*=route]').names()",
+                "intent": rng.choice([
+                    "find all route handlers",
+                    "list API endpoints",
+                    "show all @route decorated functions",
+                ]),
+                "shape": "select.names",
+                "category": "terminal",
+            },
+            # --- Go: add context ---
+            {
+                "chain": f"source({q(go_mod)}).find('.func:exported:not(:has(.id#ctx))').addParam('ctx context.Context', before='*')",
+                "intent": rng.choice([
+                    f"add context.Context to Go functions that don't have it in {go_mod}",
+                    f"propagate ctx through public functions in {go_mod}",
+                ]),
+                "shape": "source.find.addParam",
+                "category": "mutation",
+                "language": "go",
+            },
+            # --- TypeScript: find any types ---
+            {
+                "chain": f"source({q(ts_mod)}).find('.func[signature*=any]').names()",
+                "intent": rng.choice([
+                    f"find functions returning any in {ts_mod}",
+                    f"which functions in {ts_mod} use any types",
+                ]),
+                "shape": "source.find.names",
+                "category": "terminal",
+                "language": "typescript",
+            },
         ]
 
         return scenarios

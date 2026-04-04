@@ -250,6 +250,64 @@ _PSEUDO_SELECTORS: list[str] = [
     ":first-child",
     ":last-child",
     ":has-docstring",
+    ":named",
+    ":void",
+    ":typed",
+    ":variadic",
+    ":static",
+    ":const",
+    ":public",
+    ":private",
+    ":is-called",
+    ":is-referenced",
+    ":unreferenced",
+    ":definition",
+    ":reference",
+    ":scope",
+]
+
+# Pseudo-classes that take arguments
+_PSEUDO_WITH_ARGS: list[tuple[str, list[str]]] = [
+    (":calls", [
+        "execute", "query", "fetch", "print", "validate", "process",
+        "connect", "send", "read", "write", "parse", "serialize",
+        "authenticate", "authorize", "log", "emit", "dispatch",
+    ]),
+    (":called-by", [
+        "main", "handle_request", "process_data", "run", "setup",
+        "test_validate", "init", "start", "execute",
+    ]),
+    (":scope", [
+        "function", "class", "module", "loop", "if", "try",
+    ]),
+    (":matches", [
+        '"return None"',
+        '"self.___ = ___"',
+        '"db.execute()"',
+        '"raise ValueError"',
+        '"logger.debug()"',
+        '"await ___"',
+        '"for ___ in ___"',
+        '"if ___ is None"',
+        '"except Exception"',
+        '"print()"',
+        '"os.path.join()"',
+        '"json.loads()"',
+    ]),
+    (":nth-child", ["1", "2", "3"]),
+    (":precedes", ["function_definition", "class_definition", "import"]),
+    (":follows", ["import", "class", "function"]),
+]
+
+# Pseudo-elements for navigation
+_PSEUDO_ELEMENTS: list[str] = [
+    "::callers",
+    "::callees",
+    "::parent",
+    "::scope",
+    "::parent-definition",
+    "::next-sibling",
+    "::prev-sibling",
 ]
 
 _ATTR_PATTERNS: list[str] = [
@@ -260,6 +318,17 @@ _ATTR_PATTERNS: list[str] = [
     '[name^="get_"]',
     '[name$="_service"]',
     '[name^="validate_"]',
+    '[annotation*="pytest"]',
+    '[annotation*="route"]',
+    '[modifier=async]',
+    '[modifier=static]',
+    '[signature=int]',
+    '[signature=bool]',
+    '[params=0]',
+    '[params=2]',
+    '[peek*="SELECT"]',
+    '[peek*="TODO"]',
+    '[qualified*="auth."]',
 ]
 
 # ---------------------------------------------------------------------------
@@ -270,46 +339,79 @@ def sample_selector(rng: random.Random) -> str:
     """Sample a single CSS-like selector.
 
     Distribution:
-    - 40%  bare type              e.g. ``.fn``
-    - 30%  with name              e.g. ``.fn#validate_token``
+    - 25%  bare type              e.g. ``.fn``
+    - 20%  with name              e.g. ``.fn#validate_token``
     - 15%  with pseudo-class      e.g. ``.fn:exported``
-    - 15%  with attribute         e.g. ``.fn[name^="test_"]``
+    - 10%  with pseudo-class+arg  e.g. ``.func:calls(execute)``
+    - 10%  with attribute         e.g. ``.fn[name^="test_"]``
+    - 10%  with pseudo-element    e.g. ``.fn#main::callees``
+    - 10%  compound               e.g. ``.func:named:unreferenced``
     """
     node = rng.choice(_NODE_TYPES)
     roll = rng.random()
-    if roll < 0.40:
+    if roll < 0.25:
         return node
-    elif roll < 0.70:
+    elif roll < 0.45:
         name = rng.choice(FUNCTION_NAMES)
         return f"{node}#{name}"
-    elif roll < 0.85:
+    elif roll < 0.60:
         pseudo = rng.choice(_PSEUDO_SELECTORS)
         return f"{node}{pseudo}"
-    else:
+    elif roll < 0.70:
+        # Pseudo-class with argument
+        pseudo_name, arg_pool = rng.choice(_PSEUDO_WITH_ARGS)
+        arg = rng.choice(arg_pool)
+        return f"{node}{pseudo_name}({arg})"
+    elif roll < 0.80:
         attr = rng.choice(_ATTR_PATTERNS)
         return f"{node}{attr}"
+    elif roll < 0.90:
+        # Pseudo-element (navigation)
+        name = rng.choice(FUNCTION_NAMES)
+        pe = rng.choice(_PSEUDO_ELEMENTS)
+        return f"{node}#{name}{pe}"
+    else:
+        # Compound: two pseudo-classes
+        p1 = rng.choice(_PSEUDO_SELECTORS)
+        p2 = rng.choice([p for p in _PSEUDO_SELECTORS if p != p1])
+        return f"{node}{p1}{p2}"
 
 
 def sample_composed_selector(rng: random.Random) -> str:
     """Sample a composed CSS-like selector.
 
     Distribution:
-    - 40%  descendant   ``A B``
-    - 20%  child        ``A > B``
-    - 20%  :has()       ``A:has(B)``
-    - 20%  :not(:has()) ``A:not(:has(B))``
+    - 30%  descendant   ``A B``
+    - 15%  child        ``A > B``
+    - 15%  :has()       ``A:has(B)``
+    - 15%  :not(:has()) ``A:not(:has(B))``
+    - 15%  :calls + :not(:has()) ``A:calls(X):not(:has(.try))``
+    - 10%  :matches + modifier ``A:matches("code"):named``
     """
     a = sample_selector(rng)
     b = sample_selector(rng)
     roll = rng.random()
-    if roll < 0.40:
+    if roll < 0.30:
         return f"{a} {b}"
-    elif roll < 0.60:
+    elif roll < 0.45:
         return f"{a} > {b}"
-    elif roll < 0.80:
+    elif roll < 0.60:
         return f"{a}:has({b})"
-    else:
+    elif roll < 0.75:
         return f"{a}:not(:has({b}))"
+    elif roll < 0.90:
+        # :calls + :not(:has()) pattern (common: "calls X without error handling")
+        call_name = rng.choice(FUNCTION_NAMES[:20])
+        guard = rng.choice([".try", ".catch", ".except", "try_statement"])
+        return f".func:calls({call_name}):not(:has({guard}))"
+    else:
+        # :matches with modifier
+        _, args = rng.choice(_PSEUDO_WITH_ARGS[:1])  # :matches args
+        if _PSEUDO_WITH_ARGS[3][0] == ":matches":
+            _, args = _PSEUDO_WITH_ARGS[3]
+        pattern = rng.choice(args)
+        modifier = rng.choice([":named", ":exported", ":async", ":void"])
+        return f".func:matches({pattern}){modifier}"
 
 
 # ---------------------------------------------------------------------------

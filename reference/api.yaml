@@ -88,6 +88,25 @@ selectors:
     - { syntax: ":private",              description: "starts with underscore" }
     - { syntax: ":decorated(name)",      description: "has @name decorator" }
 
+  call_graph_selectors:
+    - { syntax: ":calls(name)",           description: "Function scope contains a call to name" }
+    - { syntax: ":called-by(name)",       description: "This call is inside function name" }
+    - { syntax: ":is-called",            description: "Function is called somewhere" }
+    - { syntax: ":is-referenced",        description: "Definition is referenced somewhere" }
+    - { syntax: ":unreferenced",         description: "Definition not referenced (dead code)" }
+    - { syntax: ":exported",             description: "Module-level public definition" }
+    - { syntax: ":matches(\"code\")",    description: "Contains structural code pattern" }
+    - { syntax: ":scope(type)",          description: "Within nearest ancestor of type (scope-aware)" }
+
+  pseudo_elements:
+    - { syntax: "::callers",             description: "Functions that call this" }
+    - { syntax: "::callees",             description: "Functions this calls" }
+    - { syntax: "::parent",              description: "Parent node" }
+    - { syntax: "::scope",              description: "Enclosing scope node" }
+    - { syntax: "::parent-definition",   description: "Nearest enclosing definition" }
+    - { syntax: "::next-sibling",        description: "Next sibling" }
+    - { syntax: "::prev-sibling",        description: "Previous sibling" }
+
   combinators:
     - { syntax: "A B",   description: "B is a descendant of A" }
     - { syntax: "A > B", description: "B is a direct child of A" }
@@ -1063,3 +1082,33 @@ example_chains:
       chain: "source('src/auth/**/*.py').find('.fn:exported').annotate('return', 'bool')"
     - intent: "add @property to all getter methods in the UserService class"
       chain: "select('.cls#UserService').find('.fn[name^=\"get_\"]').addDecorator('@property')"
+
+  selector_features:
+    - intent: "find all functions that call execute without error handling"
+      chain: "select('.func:calls(execute):not(:has(.try))')"
+    - intent: "find dead code — functions that are never called"
+      chain: "select('.func:named:unreferenced')"
+    - intent: "find functions that return None"
+      chain: "select('.func:matches(\"return None\")')"
+    - intent: "who calls validate_token"
+      chain: "select('.func#validate_token::callers')"
+    - intent: "what does main call"
+      chain: "select('.func#main::callees')"
+    - intent: "find functions that call both query and execute"
+      chain: "select('.func:calls(query):calls(execute)')"
+    - intent: "find return statements in their direct enclosing function"
+      chain: "select('return_statement:scope(function)')"
+    - intent: "find all exported functions"
+      chain: "select('.func:exported')"
+    - intent: "find functions containing self.db = something"
+      chain: "select('.func:matches(\"self.db = ___\")')"
+    - intent: "find unused imports"
+      chain: "select('.import:unreferenced')"
+    - intent: "remove all unused imports"
+      chain: "select('.import:unreferenced').remove()"
+    - intent: "find all route handlers"
+      chain: "select('.func[annotation*=route]')"
+    - intent: "find functions with async modifier that don't await anything"
+      chain: "select('.func:async:not(:matches(\"await\"))')"
+    - intent: "add error handling to all database query functions"
+      chain: "select('.func:calls(execute):not(:has(.try))').guard('DatabaseError', 'log and reraise')"
