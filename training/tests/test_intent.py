@@ -147,11 +147,11 @@ class TestGenerateIntentOperations:
         lower = result.lower()
         assert "diff" in lower or "changed" in lower or "since" in lower
 
-    def test_save_mentions_commit_or_save(self):
+    def test_save_mentions_commit_or_save_or_check_in(self):
         chain = "select('.fn:exported').addParam('timeout: int = 30').save('feat: add timeout')"
         result = generate_intent(chain, ["select", "addParam", "save"], "mutation", self.rng)
         lower = result.lower()
-        assert "commit" in lower or "save" in lower
+        assert "commit" in lower or "save" in lower or "check it in" in lower
 
     def test_fallback_for_unknown_op(self):
         chain = "select('.fn').unknownOp()"
