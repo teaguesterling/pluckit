@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from pluckit._context import _Context as Context
+    from pluckit.plugins.base import PluginRegistry
     from pluckit.selection import Selection
 
 
@@ -16,9 +17,10 @@ class Source:
     Lazy — no I/O until .find() is called.
     """
 
-    def __init__(self, glob: str, context: Context) -> None:
+    def __init__(self, glob: str, context: Context, registry: PluginRegistry | None = None) -> None:
         self.glob = glob
         self._ctx = context
+        self._registry = registry
 
     @property
     def _resolved_glob(self) -> str:
@@ -34,4 +36,4 @@ class Source:
 
         sql = ast_select_sql(self._resolved_glob, selector)
         rel = self._ctx.db.sql(sql)
-        return Selection(rel, self._ctx)
+        return Selection(rel, self._ctx, self._registry)
