@@ -1,0 +1,19 @@
+__pycache__/
+*.pyc
+*.egg-info/
+dist/
+build/
+.eggs/
+
+# Generated training data (regenerate with run_pipeline.sh)
+training/raw_pairs.jsonl
+training/valid_pairs.jsonl
+training/rejected.jsonl
+training/training.jsonl
+training/train.jsonl
+training/val.jsonl
+training/system_prompt.txt
+
+# Model artifacts
+pluckit-lora/
+*.gguf
