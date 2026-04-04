@@ -14,7 +14,8 @@ from typing import TYPE_CHECKING, Any
 import duckdb
 
 from pluckit._sql import _esc, _selector_to_where, descendant_join, read_ast_sql
-from pluckit.types import NodeInfo
+from pluckit.plugins.base import PluginRegistry
+from pluckit.types import NodeInfo, PluckerError
 
 if TYPE_CHECKING:
     from pluckit._context import _Context as Context
@@ -54,9 +55,41 @@ _FILTER_SUFFIXES = {"startswith", "endswith", "contains", "gt", "lt", "gte", "lt
 class Selection:
     """A lazy set of AST nodes backed by a DuckDB relation."""
 
-    def __init__(self, relation: duckdb.DuckDBPyRelation, context: Context) -> None:
+    def __init__(self, relation: duckdb.DuckDBPyRelation, context: Context, registry: PluginRegistry | None = None) -> None:
         self._rel = relation
         self._ctx = context
+        self._registry = registry
+
+    def __getattr__(self, name: str):
+        """Delegate unknown attributes to plugin registry."""
+        # Guard against recursion during __init__ (before _registry is set)
+        registry = self.__dict__.get("_registry")
+        if registry is not None and name in registry.methods:
+            plugin, method_name = registry.methods[name]
+            method = getattr(plugin, method_name)
+            # Check for upgrades
+            if name in registry.upgrades:
+                up_plugin, up_method = registry.upgrades[name]
+                upgrade_fn = getattr(up_plugin, up_method)
+                def upgraded(*args, **kwargs):
+                    core_result = method(self, *args, **kwargs)
+                    return upgrade_fn(core_result, self)
+                return upgraded
+            return lambda *args, **kwargs: method(self, *args, **kwargs)
+
+        # Check if a known plugin provides this (for helpful errors)
+        if registry is not None:
+            provider = registry.method_provider(name)
+        else:
+            from pluckit.plugins.base import _KNOWN_PROVIDERS
+            provider = _KNOWN_PROVIDERS.get(name)
+        if provider:
+            raise PluckerError(
+                f"{name}() requires the {provider} plugin. "
+                f"Use: Plucker(code=..., plugins=[{provider}])"
+            )
+
+        raise AttributeError(f"Selection has no method '{name}'")
 
     def _view_name(self, prefix: str = "sel") -> str:
         """Generate a unique view name."""
@@ -74,7 +107,7 @@ class Selection:
 
     def _new(self, rel: duckdb.DuckDBPyRelation) -> Selection:
         """Create a new Selection sharing the same context."""
-        return Selection(rel, self._ctx)
+        return Selection(rel, self._ctx, self._registry)
 
     def _file_paths(self) -> list[str]:
         """Get distinct file paths from this selection."""
