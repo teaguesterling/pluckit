@@ -315,21 +315,6 @@ _TEMPLATES: dict[str, list[str]] = {
         "add type annotation to {selector}",
         "annotate {selector} with type hints",
     ],
-    "returnType": [
-        "set return type of {selector} to {type}",
-        "add return type {type} to {selector}",
-    ],
-    "addMethod": [
-        "add {method_name} method to {selector}",
-        "implement {method_name} on {selector}",
-    ],
-    "addBase": [
-        "make {selector} inherit from {base}",
-        "add {base} as base class to {selector}",
-    ],
-    "addProperty": [
-        "add {property_name} property to {selector}",
-    ],
     "_fallback": [
         "apply {op_name} to {selector}",
         "{op_name} on {selector}",

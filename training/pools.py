@@ -435,7 +435,7 @@ ARG_SPECS: list[str] = [
 ]
 
 # ---------------------------------------------------------------------------
-# TYPE_ANNOTATIONS — for annotate/returnType operations
+# TYPE_ANNOTATIONS — for annotate operations
 # ---------------------------------------------------------------------------
 
 TYPE_ANNOTATIONS: list[str] = [
@@ -624,7 +624,7 @@ CODE_CONTEXT_SNIPPETS: dict[str, list[dict[str, str]]] = {
         {
             "code": "function fetchData(url: string): any {\n    return fetch(url).then(r => r.json())\n}",
             "problem": "return type is 'any', should be typed",
-            "fix_chain": "select('.fn#fetchData').returnType('Promise<Data>').replaceWith(': any', ': Promise<Data>')",
+            "fix_chain": "select('.fn#fetchData').annotate('return', 'Promise<Data>').replaceWith(': any', ': Promise<Data>')",
         },
     ],
 }

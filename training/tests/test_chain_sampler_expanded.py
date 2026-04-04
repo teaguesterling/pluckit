@@ -102,11 +102,11 @@ class TestNewOperations:
                 break
         assert found, "addDecorator should appear in generated chains"
 
-    def test_ensureImport_in_chain(self, sampler):
+    def test_annotate_in_chain(self, sampler):
         found = False
         for _ in range(500):
             result = sampler.sample()
-            if "ensureImport(" in result["chain"]:
+            if "annotate(" in result["chain"]:
                 found = True
                 break
-        assert found, "ensureImport should appear in generated chains"
+        assert found, "annotate should appear in generated chains"

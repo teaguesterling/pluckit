@@ -255,7 +255,7 @@ class ChainSampler:
         elif fix_op == "addParam":
             chain = f"{entry}.addParam('ctx context.Context', before='*')"
         elif fix_op == "annotate":
-            chain = f"{entry}.returnType('bool | None')"
+            chain = f"{entry}.annotate('return', 'bool | None')"
         else:
             chain = f"{entry}.at_line({line}).replaceWith('old_code', 'fixed_code')"
 
@@ -695,12 +695,6 @@ class ChainSampler:
             param_name = self._quote(rng.choice(_REMOVE_PARAM_NAMES))
             return f"removeArg({param_name})"
 
-        # replaceArg
-        if name == "replaceArg":
-            param_name = self._quote(rng.choice(_REMOVE_PARAM_NAMES))
-            expr = self._quote(rng.choice(["None", "default_value", "0", "''", "False"]))
-            return f"replaceArg({param_name}, {expr})"
-
         # addDecorator
         if name == "addDecorator":
             dec = self._quote(rng.choice(DECORATOR_SPECS))
@@ -711,45 +705,21 @@ class ChainSampler:
             dec = self._quote(rng.choice(["deprecated", "staticmethod", "lru_cache", "override"]))
             return f"removeDecorator({dec})"
 
-        # ensureImport
-        if name == "ensureImport":
-            imp = self._quote(rng.choice(IMPORT_SPECS))
-            return f"ensureImport({imp})"
-
-        # removeImport
-        if name == "removeImport":
-            mod = self._quote(rng.choice(["os", "sys", "re", "json", "typing"]))
-            return f"removeImport({mod})"
-
         # annotate
         if name == "annotate":
             target = self._quote(rng.choice(["return", "self", "data", "result", "value"]))
             type_str = self._quote(rng.choice(TYPE_ANNOTATIONS))
             return f"annotate({target}, {type_str})"
 
-        # returnType
-        if name == "returnType":
-            type_str = self._quote(rng.choice(TYPE_ANNOTATIONS))
-            return f"returnType({type_str})"
+        # ensureImport (Source-level, but handled here for seed examples)
+        if name == "ensureImport":
+            imp = self._quote(rng.choice(IMPORT_SPECS))
+            return f"ensureImport({imp})"
 
-        # addMethod
-        if name == "addMethod":
-            method = self._quote(rng.choice([
-                "def __repr__(self) -> str:\\n    return f\"{self.__class__.__name__}\"",
-                "def validate(self) -> bool:\\n    return True",
-                "def to_dict(self) -> dict:\\n    return vars(self)",
-            ]))
-            return f"addMethod({method})"
-
-        # addProperty
-        if name == "addProperty":
-            prop_name = self._quote(rng.choice(["created_at", "updated_at", "is_active", "version"]))
-            return f"addProperty({prop_name})"
-
-        # addBase
-        if name == "addBase":
-            base = self._quote(rng.choice(["ABC", "BaseModel", "Serializable", "EventEmitter"]))
-            return f"addBase({base})"
+        # removeImport (Source-level)
+        if name == "removeImport":
+            mod = self._quote(rng.choice(["os", "sys", "re", "json", "typing"]))
+            return f"removeImport({mod})"
 
         # Fallback: no-arg call
         return f"{name}()"
