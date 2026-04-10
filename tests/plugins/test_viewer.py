@@ -246,6 +246,73 @@ class TestRenderOutline:
         assert "def __init__" in output
 
 
+class TestNumericShow:
+    def test_show_n_lines(self, pluck):
+        # Get first 1 line of top_level_fn
+        output = pluck.view(".fn#top_level_fn { show: 1; }")
+        assert "def top_level_fn(x):" in output
+        # Body should be truncated
+        assert "return x * 2" not in output
+        # Should have truncation marker
+        assert "..." in output
+
+    def test_show_many_lines(self, pluck):
+        output = pluck.view(".fn#top_level_fn { show: 10; }")
+        # With 10 lines, the whole body (which is short) should be there
+        assert "def top_level_fn(x):" in output
+        assert "return x * 2" in output
+
+
+class TestNativeSignature:
+    def test_synthesize_function_signature(self):
+        from pluckit.plugins.viewer import _synthesize_signature
+        node = {
+            "type": "function_definition",
+            "name": "foo",
+            "language": "python",
+            "signature_type": "int",
+            "parameters": [
+                {"name": "x", "type": "int"},
+                {"name": "y", "type": "int"},
+            ],
+            "modifiers": [],
+        }
+        sig = _synthesize_signature(node)
+        assert sig == "def foo(x: int, y: int) -> int:"
+
+    def test_synthesize_class_signature(self):
+        from pluckit.plugins.viewer import _synthesize_signature
+        node = {
+            "type": "class_definition",
+            "name": "Foo",
+            "language": "python",
+        }
+        sig = _synthesize_signature(node)
+        assert sig == "class Foo:"
+
+    def test_synthesize_returns_none_when_no_params(self):
+        from pluckit.plugins.viewer import _synthesize_signature
+        node = {
+            "type": "function_definition",
+            "name": "foo",
+            "language": "python",
+            "parameters": None,
+        }
+        assert _synthesize_signature(node) is None
+
+    def test_synthesize_go_function(self):
+        from pluckit.plugins.viewer import _synthesize_signature
+        node = {
+            "type": "function_declaration",
+            "name": "Foo",
+            "language": "go",
+            "signature_type": "error",
+            "parameters": [{"name": "ctx", "type": "context.Context"}],
+        }
+        sig = _synthesize_signature(node)
+        assert "func Foo(ctx: context.Context) error {" in sig
+
+
 class TestMultipleRules:
     def test_multiple_rules_rendered(self, pluck):
         query = ".fn#top_level_fn { show: signature; } .fn#main { show: body; }"

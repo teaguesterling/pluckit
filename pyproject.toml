@@ -16,6 +16,9 @@ dev = [
     "pytest>=8.0",
 ]
 
+[project.scripts]
+pluckit = "pluckit.cli:main"
+
 [tool.hatch.build.targets.wheel]
 packages = ["src/pluckit"]
 

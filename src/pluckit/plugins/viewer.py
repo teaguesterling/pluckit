@@ -292,10 +292,16 @@ _RESERVED_PROPERTIES = frozenset({
     "trace", "depth", "expand",
 })
 
-# Show values that are valid in v1.0
+# Show values that are valid in v1.0.
+# Plus numeric values (show: 3, show: 10) for "first N lines of body".
 _SHOW_VALUES = frozenset({
     "body", "signature", "outline", "enclosing",
 })
+
+
+def _is_numeric_show(value: str) -> bool:
+    """Check if a show value is a numeric 'first N lines' form."""
+    return value.isdigit() and int(value) > 0
 
 # Node types whose default show is "outline"
 _OUTLINE_BY_DEFAULT = frozenset({
@@ -354,6 +360,74 @@ def _extract_body(lines: list[str], start_line: int, end_line: int) -> str:
     start = max(0, start_line - 1)
     end = min(len(lines), end_line)
     return "".join(lines[start:end]).rstrip("\n")
+
+
+def _synthesize_signature(node: dict) -> str | None:
+    """Build a signature string from sitting_duck's native extraction columns.
+
+    Returns None if the node doesn't have enough metadata to synthesize
+    (e.g., no parameters list, or not a function/class).
+    """
+    node_type = node.get("type", "") or ""
+    name = node.get("name")
+    if not name:
+        return None
+
+    language = (node.get("language") or "").lower()
+    parameters = node.get("parameters")
+    signature_type = node.get("signature_type")
+    modifiers = node.get("modifiers") or []
+
+    # Classes — synthesize `class Name:` (Python) or `class Name {` (C-family)
+    if node_type in ("class_definition", "class_declaration"):
+        if language in ("python", "ruby"):
+            return f"class {name}:"
+        return f"class {name} {{"
+
+    # Functions — need parameters to synthesize
+    if node_type in ("function_definition", "method_definition", "function_declaration"):
+        if parameters is None:
+            return None
+        # parameters is a list of {'name': str, 'type': str} dicts
+        param_parts: list[str] = []
+        for p in parameters:
+            if not isinstance(p, dict):
+                continue
+            pname = p.get("name") or ""
+            if not pname:
+                continue
+            ptype = p.get("type") or ""
+            if ptype:
+                param_parts.append(f"{pname}: {ptype}")
+            else:
+                param_parts.append(pname)
+        params_str = ", ".join(param_parts)
+
+        mods_prefix = ""
+        if modifiers:
+            mods_prefix = " ".join(modifiers) + " "
+
+        if language in ("python", "ruby"):
+            ret = f" -> {signature_type}" if signature_type else ""
+            return f"{mods_prefix}def {name}({params_str}){ret}:"
+        if language in ("javascript", "typescript"):
+            ret = f": {signature_type}" if signature_type else ""
+            return f"{mods_prefix}function {name}({params_str}){ret} {{"
+        if language == "go":
+            ret = f" {signature_type}" if signature_type else ""
+            return f"func {name}({params_str}){ret} {{"
+        if language == "rust":
+            ret = f" -> {signature_type}" if signature_type else ""
+            return f"{mods_prefix}fn {name}({params_str}){ret} {{"
+        if language in ("java", "kotlin", "c", "cpp", "c++", "csharp", "c#"):
+            ret = f"{signature_type} " if signature_type else ""
+            return f"{mods_prefix}{ret}{name}({params_str}) {{"
+
+        # Unknown language — Python-style fallback
+        ret = f" -> {signature_type}" if signature_type else ""
+        return f"def {name}({params_str}){ret}:"
+
+    return None
 
 
 def _extract_signature(lines: list[str], start_line: int, end_line: int, language: str) -> str:
@@ -464,8 +538,8 @@ class AstViewer(Plugin):
         if not nodes:
             return []
 
-        show_value = rule.declarations.get("show", "").lower()
-        if show_value and show_value not in _SHOW_VALUES:
+        show_value = rule.declarations.get("show", "").lower().strip()
+        if show_value and show_value not in _SHOW_VALUES and not _is_numeric_show(show_value):
             warnings.warn(
                 f"viewer: unknown show value {show_value!r}; using default",
                 stacklevel=3,
@@ -481,15 +555,37 @@ class AstViewer(Plugin):
         return rendered
 
     def _materialize_rows(self, selection) -> list[dict]:
-        """Materialize a Selection as a list of row dicts."""
+        """Materialize a Selection as a list of row dicts.
+
+        Fetches the full set of columns needed for rendering, including
+        native-extracted signature metadata (signature_type, parameters).
+        """
         view = selection._register("view")
         try:
+            # Try to include native extraction columns. If they're not present
+            # (older sitting_duck builds), fall back to the minimal set.
+            columns = [
+                "file_path", "start_line", "end_line", "language",
+                "type", "name", "node_id", "parent_id",
+            ]
+            native_columns = ["signature_type", "parameters", "modifiers",
+                              "annotations", "qualified_name"]
+            try:
+                # Probe whether the columns exist
+                cols_result = selection._ctx.db.sql(
+                    f"DESCRIBE SELECT * FROM {view} LIMIT 0"
+                ).fetchall()
+                available = {row[0] for row in cols_result}
+                for nc in native_columns:
+                    if nc in available:
+                        columns.append(nc)
+            except Exception:
+                pass
+
+            col_list = ", ".join(columns)
             result = selection._ctx.db.sql(
-                f"SELECT file_path, start_line, end_line, language, type, name, "
-                f"node_id, parent_id FROM {view} ORDER BY file_path, node_id"
+                f"SELECT {col_list} FROM {view} ORDER BY file_path, node_id"
             ).fetchall()
-            columns = ["file_path", "start_line", "end_line", "language",
-                       "type", "name", "node_id", "parent_id"]
             return [dict(zip(columns, row)) for row in result]
         finally:
             try:
@@ -508,6 +604,8 @@ class AstViewer(Plugin):
             # Walk up to the nearest enclosing scope (function or class)
             enclosing = self._find_enclosing_scope(plucker, node)
             if enclosing:
+                # Merge enclosing node info, keeping native extraction from original if present
+                node = {**node, **enclosing}
                 file_path = enclosing["file_path"]
                 start_line = enclosing["start_line"]
                 end_line = enclosing["end_line"]
@@ -518,12 +616,25 @@ class AstViewer(Plugin):
         if not lines:
             return ""
 
+        header_range = f"{start_line}-{end_line}"
+
         if show == "body":
             text = _extract_body(lines, start_line, end_line)
         elif show == "signature":
-            text = _extract_signature(lines, start_line, end_line, language)
+            # Prefer native extraction when available — gives clean synthesized signature
+            text = _synthesize_signature(node)
+            if not text:
+                text = _extract_signature(lines, start_line, end_line, language)
         elif show == "outline":
             text = self._extract_outline(plucker, node, lines)
+        elif _is_numeric_show(show):
+            # show: N — first N lines of the body
+            n_lines = int(show)
+            limit = min(start_line + n_lines - 1, end_line)
+            text = _extract_body(lines, start_line, limit)
+            header_range = f"{start_line}-{limit}"
+            if limit < end_line:
+                text = text + "\n    ..."
         else:
             text = _extract_body(lines, start_line, end_line)
 
@@ -532,42 +643,96 @@ class AstViewer(Plugin):
 
         lang_tag = _language_tag(language)
         rel_path = self._relpath(plucker, file_path)
-        header = f"# {rel_path}:{start_line}-{end_line}"
+        header = f"# {rel_path}:{header_range}"
         return f"{header}\n```{lang_tag}\n{text}\n```"
 
     def _extract_outline(self, plucker: Plucker, node: dict, lines: list[str]) -> str:
-        """For a class/module, return signature + child function signatures."""
-        # Parent signature (first line typically)
-        parent_sig = _extract_signature(
-            lines, node["start_line"], node["end_line"],
-            node.get("language", "") or ""
+        """For a class/module, return a rich outline.
+
+        Includes:
+        - Parent signature (class header or module name)
+        - Child function/method signatures (via native extraction when available)
+        - Class-level assignments (dataclass fields, constants)
+        - Class docstring (first line)
+        """
+        language = node.get("language", "") or ""
+        # Parent signature — prefer native synthesis
+        parent_sig = _synthesize_signature(node) or _extract_signature(
+            lines, node["start_line"], node["end_line"], language
         )
 
-        # Find child functions via SQL: descendants with semantic_type = function
+        # Find direct children inside the class body:
+        # - function/method definitions (for method signatures)
+        # - assignments at class depth (dataclass fields, constants)
+        # - expression statements (docstrings)
+        #
+        # A Python class_definition's direct children are: `class`, name, `:`,
+        # `block`. The block contains the members. So members are at
+        # depth = class_depth + 2.
         try:
+            file_path_esc = _esc(node['file_path'])
+            node_id = int(node['node_id'])
             children = plucker._ctx.db.sql(
-                f"SELECT file_path, start_line, end_line, language FROM "
-                f"read_ast('{_esc(node['file_path'])}') "
-                f"WHERE node_id > {int(node['node_id'])} "
-                f"AND node_id <= {int(node['node_id'])} + "
-                f"  (SELECT descendant_count FROM read_ast('{_esc(node['file_path'])}') "
-                f"   WHERE node_id = {int(node['node_id'])}) "
-                f"AND type IN ('function_definition', 'method_definition', 'function_declaration') "
-                f"ORDER BY start_line"
+                f"WITH target AS ( "
+                f"  SELECT node_id, depth, descendant_count "
+                f"  FROM read_ast('{file_path_esc}') "
+                f"  WHERE node_id = {node_id} "
+                f") "
+                f"SELECT c.node_id, c.type, c.name, c.start_line, c.end_line, c.language, "
+                f"       c.signature_type, c.parameters, c.modifiers, c.annotations, c.peek "
+                f"FROM read_ast('{file_path_esc}') c, target t "
+                f"WHERE c.node_id > t.node_id "
+                f"  AND c.node_id <= t.node_id + t.descendant_count "
+                f"  AND c.depth = t.depth + 2 "
+                f"  AND c.type IN ('function_definition', 'method_definition', "
+                f"                 'function_declaration', 'assignment', "
+                f"                 'expression_statement') "
+                f"ORDER BY c.start_line"
             ).fetchall()
         except Exception:
-            return parent_sig
+            # Simpler fallback query
+            try:
+                children = plucker._ctx.db.sql(
+                    f"SELECT node_id, type, name, start_line, end_line, language, "
+                    f"       NULL as signature_type, NULL as parameters, "
+                    f"       NULL as modifiers, NULL as annotations, peek "
+                    f"FROM read_ast('{_esc(node['file_path'])}') "
+                    f"WHERE node_id > {int(node['node_id'])} "
+                    f"  AND node_id <= {int(node['node_id'])} + "
+                    f"      (SELECT descendant_count FROM read_ast('{_esc(node['file_path'])}') "
+                    f"       WHERE node_id = {int(node['node_id'])}) "
+                    f"  AND type IN ('function_definition', 'method_definition', "
+                    f"               'function_declaration') "
+                    f"ORDER BY start_line"
+                ).fetchall()
+            except Exception:
+                return parent_sig
 
         child_sigs: list[str] = []
+        cols = ["node_id", "type", "name", "start_line", "end_line", "language",
+                "signature_type", "parameters", "modifiers", "annotations", "peek"]
         for row in children:
-            _, c_start, c_end, c_lang = row
-            sig = _extract_signature(lines, c_start, c_end, c_lang or "")
-            if sig:
-                child_sigs.append(sig)
+            child = dict(zip(cols, row))
+            c_type = child["type"]
+            if c_type in ("function_definition", "method_definition", "function_declaration"):
+                sig = _synthesize_signature(child)
+                if not sig:
+                    sig = _extract_signature(
+                        lines, child["start_line"], child["end_line"], child["language"] or ""
+                    )
+                if sig:
+                    child_sigs.append(sig)
+            elif c_type in ("assignment", "expression_statement"):
+                # Show class-level attributes (dataclass fields, constants) as their first line
+                text = _extract_body(lines, child["start_line"], child["start_line"])
+                if text.strip():
+                    child_sigs.append(text.strip())
 
-        if child_sigs:
-            return parent_sig + "\n" + "\n".join(f"    {s}" for s in child_sigs)
-        return parent_sig
+        if not child_sigs:
+            return parent_sig
+
+        indent = "    "
+        return parent_sig + "\n" + "\n".join(f"{indent}{s}" for s in child_sigs)
 
     def _find_enclosing_scope(self, plucker: Plucker, node: dict) -> dict | None:
         """Walk up parent_id chain to find the nearest scope (function or class)."""
