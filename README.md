@@ -10,10 +10,26 @@ extension, so queries compile to SQL and run against tree-sitter ASTs for
 27 languages.
 
 > **Status:** v0.1-alpha. Query, view, and mutate work end-to-end. Call graph,
-> history, and scope plugins are v0.2. The package name is tentative —
-> `pluckit` is taken on PyPI.
+> history, and scope plugins are v0.2.
 
 ## Install
+
+```bash
+pip install ast-pluckit
+```
+
+The distribution name is `ast-pluckit` (the bare `pluckit` name was taken on
+PyPI by an abandoned 2019 project). The import name and CLI are still
+`pluckit`:
+
+```bash
+pluckit view ".fn#main" src/**/*.py
+```
+```python
+from pluckit import Plucker
+```
+
+For local development:
 
 ```bash
 pip install -e .
