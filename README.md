@@ -9,6 +9,10 @@ the [sitting_duck](https://github.com/teaguesterling/sitting_duck) AST
 extension, so queries compile to SQL and run against tree-sitter ASTs for
 27 languages.
 
+- **Documentation:** [pluckit.readthedocs.io](https://pluckit.readthedocs.io)
+- **PyPI:** [`ast-pluckit`](https://pypi.org/project/ast-pluckit/)
+- **Changelog:** [CHANGELOG.md](CHANGELOG.md)
+
 > **Status:** v0.1-alpha. Query, view, and mutate work end-to-end. Call graph,
 > history, and scope plugins are v0.2.
 
@@ -35,10 +39,20 @@ For local development:
 pip install -e .
 ```
 
-pluckit needs DuckDB with the `sitting_duck` community extension. It's
-auto-installed on first use.
+pluckit needs DuckDB with the `sitting_duck` community extension. It will
+auto-install on first use, but you can also run:
+
+```bash
+pluckit init
+```
+
+to install and verify the extensions eagerly and get clearer diagnostics
+if anything fails.
 
 ## The CLI
+
+Full reference lives in the [CLI docs](https://pluckit.readthedocs.io/en/latest/cli/).
+The short version:
 
 ### View — render matched code regions as markdown
 
@@ -78,6 +92,28 @@ match:
 | src/validate.py    | 35-54   | `def _is_garbled(intent: str) -> bool:`    |
 | src/validate.py    | 73-88   | `def _flatten_ops(comp: Any) -> list[str]:`|
 | src/validate.py    | 102-196 | `def validate_chain(chain: str) -> Result:`|
+```
+
+### Find — list matches for scripting
+
+`find` is the terse companion to `view`. It emits one line per match in
+formats designed for shell pipelines and agent tool-use:
+
+```bash
+# Default: file:line:name, one per line — feed directly into $(...)
+pluckit find ".fn:exported" src/**/*.py
+
+# Just the names — good for set operations
+pluckit find ".fn[name^=test_]" --format names tests/*.py | sort -u
+
+# Signature table — a lightweight audit view
+pluckit find ".fn:exported" --format signature src/**/*.py
+
+# Machine-readable JSON — one object per match
+pluckit find ".cls" --format json src/**/*.py
+
+# Just the total count
+pluckit find ".fn" --count src/**/*.py
 ```
 
 ### Edit — apply structural changes to matched nodes
@@ -127,9 +163,26 @@ pluckit edit ".fn#main" --insert-lines before ".ret" "cleanup()" src/*.py
 # Wrap matched nodes
 pluckit edit ".call#query" --wrap "try:" "except DatabaseError:\n    raise" src/*.py
 
-# See what would change without writing
+# See what would change without writing — prints a real unified diff
 pluckit edit ".fn#foo" --remove --dry-run src/*.py
 ```
+
+**Chaining edits.** Multiple operations can share a single group, and
+multiple `(selector, operations)` groups can run in one invocation,
+separated by `--`. This is how you keep an API and its call sites in
+sync atomically:
+
+```bash
+pluckit edit \
+    ".cls#Foo .fn#__init__" --add-param "foo: int = 30" \
+                            --append-lines "self.foo = foo" \
+    -- \
+    ".call#Foo"             --add-arg "foo=10" \
+    src/**/*.py
+```
+
+The whole command is one transaction: if any group produces invalid
+syntax in any file, every affected file rolls back to its pre-edit state.
 
 **Line-level vs character-level edits.** `--prepend-lines`, `--append-lines`,
 and `--insert-lines` all insert whole new lines at indentation-matched

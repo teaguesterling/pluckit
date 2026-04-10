@@ -4,9 +4,44 @@ build-backend = "hatchling.build"
 
 [project]
 name = "ast-pluckit"
-version = "0.1.0"
-description = "A fluent API for querying, viewing, and mutating source code — CSS selectors over ASTs, backed by DuckDB"
-requires-python = ">=3.12"
+version = "0.1.0a1"
+description = "A fluent API for querying, viewing, and mutating source code — CSS selectors over ASTs, backed by DuckDB."
+readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
+requires-python = ">=3.10"
+authors = [
+    { name = "Teague Sterling", email = "teaguesterling@gmail.com" },
+]
+keywords = [
+    "ast",
+    "tree-sitter",
+    "code-search",
+    "codemod",
+    "refactoring",
+    "static-analysis",
+    "duckdb",
+    "sitting-duck",
+    "css-selectors",
+]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: POSIX :: Linux",
+    "Operating System :: MacOS",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3 :: Only",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Software Development :: Code Generators",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+    "Topic :: Software Development :: Quality Assurance",
+    "Topic :: Utilities",
+    "Typing :: Typed",
+]
 dependencies = [
     "duckdb>=1.1.0",
 ]
@@ -14,7 +49,21 @@ dependencies = [
 [project.optional-dependencies]
 dev = [
     "pytest>=8.0",
+    "ruff>=0.6",
 ]
+docs = [
+    "mkdocs>=1.6",
+    "mkdocs-material>=9.5",
+    "mkdocs-exclude>=1.0",
+    "pymdown-extensions>=10.9",
+]
+
+[project.urls]
+Homepage = "https://github.com/teaguesterling/pluckit"
+Documentation = "https://pluckit.readthedocs.io"
+Repository = "https://github.com/teaguesterling/pluckit"
+Issues = "https://github.com/teaguesterling/pluckit/issues"
+Changelog = "https://github.com/teaguesterling/pluckit/blob/main/CHANGELOG.md"
 
 [project.scripts]
 pluckit = "pluckit.cli:main"
@@ -22,5 +71,28 @@ pluckit = "pluckit.cli:main"
 [tool.hatch.build.targets.wheel]
 packages = ["src/pluckit"]
 
+[tool.hatch.build.targets.sdist]
+include = [
+    "src/pluckit",
+    "tests",
+    "README.md",
+    "LICENSE",
+    "CHANGELOG.md",
+    "pyproject.toml",
+]
+exclude = [
+    "training",
+    "reference",
+    "docs",
+]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B"]
+ignore = ["E501"]  # line length handled by formatter
