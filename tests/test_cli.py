@@ -191,3 +191,99 @@ class TestCliView:
         assert result == 0
         captured = capsys.readouterr()
         assert "pluckit" in captured.out
+
+
+class TestCliEdit:
+    def test_replace_2arg(self, cli_repo, capsys):
+        result = main([
+            "edit",
+            ".fn#top_level_fn",
+            str(cli_repo / "src/sample.py"),
+            "--replace", "return x * 2", "return x * 3",
+        ])
+        assert result == 0
+        content = (cli_repo / "src" / "sample.py").read_text()
+        assert "return x * 3" in content
+        assert "return x * 2" not in content
+
+    def test_rename(self, cli_repo, capsys):
+        result = main([
+            "edit",
+            ".fn#top_level_fn",
+            str(cli_repo / "src/sample.py"),
+            "--rename", "renamed_fn",
+        ])
+        assert result == 0
+        content = (cli_repo / "src" / "sample.py").read_text()
+        assert "def renamed_fn" in content
+
+    def test_add_param(self, cli_repo):
+        result = main([
+            "edit",
+            ".fn#top_level_fn",
+            str(cli_repo / "src/sample.py"),
+            "--add-param", "debug: bool = False",
+        ])
+        assert result == 0
+        content = (cli_repo / "src" / "sample.py").read_text()
+        assert "top_level_fn(x, debug: bool = False)" in content
+
+    def test_remove(self, cli_repo):
+        result = main([
+            "edit",
+            ".fn#top_level_fn",
+            str(cli_repo / "src/sample.py"),
+            "--remove",
+        ])
+        assert result == 0
+        content = (cli_repo / "src" / "sample.py").read_text()
+        assert "def top_level_fn" not in content
+        # Other content preserved
+        assert "class Config" in content
+
+    def test_dry_run_does_not_modify(self, cli_repo):
+        original = (cli_repo / "src" / "sample.py").read_text()
+        result = main([
+            "edit",
+            ".fn#top_level_fn",
+            str(cli_repo / "src/sample.py"),
+            "--remove",
+            "--dry-run",
+        ])
+        assert result == 0
+        content = (cli_repo / "src" / "sample.py").read_text()
+        assert content == original
+
+    def test_no_matches_returns_zero(self, cli_repo):
+        result = main([
+            "edit",
+            ".fn#nonexistent",
+            str(cli_repo / "src/sample.py"),
+            "--remove",
+        ])
+        assert result == 0
+
+    def test_requires_mutation_flag(self, cli_repo):
+        # argparse exits with 2 when a required mutually-exclusive group is missing
+        with pytest.raises(SystemExit):
+            main([
+                "edit",
+                ".fn#top_level_fn",
+                str(cli_repo / "src/sample.py"),
+            ])
+
+    def test_multiple_paths(self, cli_repo):
+        # Create a second file
+        (cli_repo / "src" / "other.py").write_text(
+            "def top_level_fn(x):\n    return x + 1\n"
+        )
+        result = main([
+            "edit",
+            ".fn#top_level_fn",
+            str(cli_repo / "src/sample.py"),
+            str(cli_repo / "src/other.py"),
+            "--rename", "renamed",
+        ])
+        assert result == 0
+        assert "def renamed" in (cli_repo / "src" / "sample.py").read_text()
+        assert "def renamed" in (cli_repo / "src" / "other.py").read_text()

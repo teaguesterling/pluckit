@@ -8,8 +8,13 @@ Usage:
     echo ".class#Config { show: outline; }" | pluckit view - "**/*.py"
     pluckit view ".fn { show: signature; }" file1.py file2.py
 
-The CLI is intentionally small — it dispatches to subcommands. Currently
-only `view` is supported; `find` and `mutate` will follow.
+    pluckit edit ".fn#foo" --replace "return None" "raise ValueError()" src/*.py
+    pluckit edit ".fn:exported" --add-param "timeout: int = 30" src/**/*.py
+    pluckit edit ".fn#deprecated" --remove src/*.py
+    pluckit edit ".fn#foo" --rename "bar" src/*.py
+
+The CLI dispatches to subcommands. `view` renders matched code regions;
+`edit` applies structural changes with syntax-validated transactions.
 """
 from __future__ import annotations
 
@@ -74,6 +79,93 @@ def _build_parser() -> argparse.ArgumentParser:
         "-r", "--repo",
         metavar="DIR",
         help="Repository root for relative paths (default: cwd)",
+    )
+
+    # `edit` subcommand
+    edit_p = subparsers.add_parser(
+        "edit",
+        help="Apply structural edits to matched nodes",
+        description=(
+            "Apply a structural edit to every node matching SELECTOR "
+            "in PATHS. Exactly one edit flag is required. "
+            "All edits are transactional — if any file fails syntax "
+            "re-validation after splicing, every affected file is rolled "
+            "back to its pre-edit state."
+        ),
+    )
+    edit_p.add_argument(
+        "selector",
+        help="CSS selector for target nodes (e.g., '.fn#main' or '.fn:exported')",
+    )
+    edit_p.add_argument(
+        "paths",
+        nargs="+",
+        help="File paths or glob patterns",
+    )
+    edit_p.add_argument(
+        "-r", "--repo",
+        metavar="DIR",
+        help="Repository root for relative paths (default: cwd)",
+    )
+    edit_p.add_argument(
+        "-n", "--dry-run",
+        action="store_true",
+        help="Print the count of matched nodes without writing anything",
+    )
+
+    # Edit operation flags — mutually exclusive
+    ops = edit_p.add_mutually_exclusive_group(required=True)
+    ops.add_argument(
+        "--replace-with",
+        metavar="CODE",
+        help="Replace entire matched node with CODE",
+    )
+    ops.add_argument(
+        "--replace",
+        nargs=2,
+        metavar=("OLD", "NEW"),
+        help="Scoped replace OLD with NEW within each matched node",
+    )
+    ops.add_argument(
+        "--prepend",
+        metavar="CODE",
+        help="Insert CODE at the top of the matched node's body",
+    )
+    ops.add_argument(
+        "--append",
+        metavar="CODE",
+        help="Insert CODE at the end of the matched node's body",
+    )
+    ops.add_argument(
+        "--wrap",
+        nargs=2,
+        metavar=("BEFORE", "AFTER"),
+        help="Wrap each matched node with BEFORE and AFTER",
+    )
+    ops.add_argument(
+        "--add-param",
+        metavar="SPEC",
+        help="Add parameter SPEC to matched function signatures",
+    )
+    ops.add_argument(
+        "--remove-param",
+        metavar="NAME",
+        help="Remove parameter NAME from matched function signatures",
+    )
+    ops.add_argument(
+        "--rename",
+        metavar="NEW_NAME",
+        help="Rename matched definitions to NEW_NAME (first name occurrence)",
+    )
+    ops.add_argument(
+        "--remove",
+        action="store_true",
+        help="Remove matched nodes entirely",
+    )
+    ops.add_argument(
+        "--unwrap",
+        action="store_true",
+        help="Remove first and last lines of matched nodes, dedent the middle",
     )
 
     return parser
@@ -155,6 +247,110 @@ def _cmd_view(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_edit(args: argparse.Namespace) -> int:
+    from pluckit import Plucker
+    from pluckit.types import PluckerError
+
+    mutation, op_name = _build_mutation_from_args(args)
+    if mutation is None:
+        print("pluckit edit: no edit operation specified", file=sys.stderr)
+        return 2
+
+    total_matched = 0
+    total_files = 0
+    for path in args.paths:
+        try:
+            pluck = Plucker(code=path, repo=args.repo)
+            selection = pluck.find(args.selector)
+            count = selection.count()
+        except PluckerError as e:
+            print(f"pluckit edit: {e}", file=sys.stderr)
+            return 1
+        except Exception as e:  # pragma: no cover — defensive
+            print(f"pluckit edit: unexpected error: {e}", file=sys.stderr)
+            return 1
+
+        if count == 0:
+            continue
+
+        total_matched += count
+        total_files += 1
+
+        if args.dry_run:
+            print(
+                f"[dry-run] {path}: would {op_name} on {count} node(s)",
+                file=sys.stderr,
+            )
+            continue
+
+        try:
+            from pluckit.mutation import MutationEngine
+            MutationEngine(pluck._ctx).apply(selection, mutation)
+        except PluckerError as e:
+            print(f"pluckit edit: {e}", file=sys.stderr)
+            return 1
+
+    if args.dry_run:
+        print(
+            f"[dry-run] {args.selector}: {total_matched} matches across {total_files} path(s)",
+            file=sys.stderr,
+        )
+    else:
+        if total_matched:
+            print(
+                f"pluckit edit: {op_name} applied to {total_matched} node(s) "
+                f"across {total_files} path(s)",
+                file=sys.stderr,
+            )
+        else:
+            print(f"pluckit edit: no matches for {args.selector!r}", file=sys.stderr)
+
+    return 0
+
+
+def _build_mutation_from_args(args: argparse.Namespace):
+    """Construct a Mutation instance from the CLI flags.
+
+    Returns (mutation, op_name) for reporting, or (None, '') if none set.
+    """
+    from pluckit.mutations import (
+        AddParam,
+        Append,
+        Prepend,
+        Remove,
+        RemoveParam,
+        Rename,
+        ReplaceWith,
+        ScopedReplace,
+        Unwrap,
+        Wrap,
+    )
+
+    if args.replace_with is not None:
+        return ReplaceWith(args.replace_with), "replaceWith"
+    if args.replace is not None:
+        old, new = args.replace
+        return ScopedReplace(old, new), "replace"
+    if args.prepend is not None:
+        return Prepend(args.prepend), "prepend"
+    if args.append is not None:
+        return Append(args.append), "append"
+    if args.wrap is not None:
+        before, after = args.wrap
+        return Wrap(before, after), "wrap"
+    if args.add_param is not None:
+        return AddParam(args.add_param), "addParam"
+    if args.remove_param is not None:
+        return RemoveParam(args.remove_param), "removeParam"
+    if args.rename is not None:
+        return Rename(args.rename), "rename"
+    if args.remove:
+        return Remove(), "remove"
+    if args.unwrap:
+        return Unwrap(), "unwrap"
+    return None, ""
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = _build_parser()
     args = parser.parse_args(argv)
@@ -169,6 +365,9 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.command == "view":
         return _cmd_view(args)
+
+    if args.command == "edit":
+        return _cmd_edit(args)
 
     parser.print_help()
     return 0
