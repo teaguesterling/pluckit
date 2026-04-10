@@ -472,41 +472,70 @@ class Selection:
     # Mutation stubs — delegate to MutationEngine (Task 6)
     # ---------------------------------------------------------------
 
-    def replaceWith(self, code: str) -> Selection:
-        """Replace matched nodes with new code."""
-        raise NotImplementedError("Mutation engine not yet implemented")
+    def replaceWith(self, *args: str) -> Selection:
+        """Replace matched nodes with new code.
+
+        One argument: replace the entire node with ``code``.
+        Two arguments: scoped find-and-replace ``old -> new`` within the node.
+        """
+        from pluckit.mutation import MutationEngine
+        from pluckit.mutations import ReplaceWith, ScopedReplace
+
+        if len(args) == 1:
+            mutation = ReplaceWith(args[0])
+        elif len(args) == 2:
+            mutation = ScopedReplace(args[0], args[1])
+        else:
+            raise TypeError(f"replaceWith takes 1 or 2 arguments, got {len(args)}")
+        return MutationEngine(self._ctx).apply(self, mutation)
 
     def addParam(self, param: str) -> Selection:
         """Add a parameter to matched function definitions."""
-        raise NotImplementedError("Mutation engine not yet implemented")
+        from pluckit.mutation import MutationEngine
+        from pluckit.mutations import AddParam
+        return MutationEngine(self._ctx).apply(self, AddParam(param))
 
     def removeParam(self, param: str) -> Selection:
         """Remove a parameter from matched function definitions."""
-        raise NotImplementedError("Mutation engine not yet implemented")
+        from pluckit.mutation import MutationEngine
+        from pluckit.mutations import RemoveParam
+        return MutationEngine(self._ctx).apply(self, RemoveParam(param))
 
     def rename(self, new_name: str) -> Selection:
-        """Rename matched nodes."""
-        raise NotImplementedError("Mutation engine not yet implemented")
+        """Rename matched definitions (name occurrence only in v1)."""
+        from pluckit.mutation import MutationEngine
+        from pluckit.mutations import Rename
+        return MutationEngine(self._ctx).apply(self, Rename(new_name))
 
     def prepend(self, code: str) -> Selection:
-        """Prepend code before matched nodes."""
-        raise NotImplementedError("Mutation engine not yet implemented")
+        """Insert code at the top of matched nodes' bodies."""
+        from pluckit.mutation import MutationEngine
+        from pluckit.mutations import Prepend
+        return MutationEngine(self._ctx).apply(self, Prepend(code))
 
     def append(self, code: str) -> Selection:
-        """Append code after matched nodes."""
-        raise NotImplementedError("Mutation engine not yet implemented")
+        """Insert code at the bottom of matched nodes' bodies."""
+        from pluckit.mutation import MutationEngine
+        from pluckit.mutations import Append
+        return MutationEngine(self._ctx).apply(self, Append(code))
 
     def wrap(self, before: str, after: str) -> Selection:
         """Wrap matched nodes with before/after code."""
-        raise NotImplementedError("Mutation engine not yet implemented")
+        from pluckit.mutation import MutationEngine
+        from pluckit.mutations import Wrap
+        return MutationEngine(self._ctx).apply(self, Wrap(before, after))
 
     def unwrap(self) -> Selection:
-        """Unwrap matched nodes (remove wrapper)."""
-        raise NotImplementedError("Mutation engine not yet implemented")
+        """Remove the first and last lines of matched nodes, dedent the rest."""
+        from pluckit.mutation import MutationEngine
+        from pluckit.mutations import Unwrap
+        return MutationEngine(self._ctx).apply(self, Unwrap())
 
     def remove(self) -> Selection:
-        """Remove matched nodes."""
-        raise NotImplementedError("Mutation engine not yet implemented")
+        """Remove matched nodes entirely."""
+        from pluckit.mutation import MutationEngine
+        from pluckit.mutations import Remove
+        return MutationEngine(self._ctx).apply(self, Remove())
 
     # ---------------------------------------------------------------
     # History stubs — delegate to History (Task 7)
