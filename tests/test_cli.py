@@ -228,6 +228,47 @@ class TestCliEdit:
         content = (cli_repo / "src" / "sample.py").read_text()
         assert "top_level_fn(x, debug: bool = False)" in content
 
+    def test_add_arg(self, cli_repo):
+        # Add a call site to the sample file
+        (cli_repo / "src" / "caller.py").write_text(
+            "def run():\n    return top_level_fn(5)\n"
+        )
+        result = main([
+            "edit",
+            ".call#top_level_fn",
+            str(cli_repo / "src/caller.py"),
+            "--add-arg", "verbose=True",
+        ])
+        assert result == 0
+        content = (cli_repo / "src" / "caller.py").read_text()
+        assert "top_level_fn(5, verbose=True)" in content
+
+    def test_remove_arg(self, cli_repo):
+        (cli_repo / "src" / "caller.py").write_text(
+            "def run():\n    return fetch(url='x', timeout=30)\n"
+        )
+        result = main([
+            "edit",
+            ".call#fetch",
+            str(cli_repo / "src/caller.py"),
+            "--remove-arg", "timeout",
+        ])
+        assert result == 0
+        content = (cli_repo / "src" / "caller.py").read_text()
+        assert "fetch(url='x')" in content
+        assert "timeout" not in content
+
+    def test_remove_param(self, cli_repo):
+        result = main([
+            "edit",
+            ".fn#top_level_fn",
+            str(cli_repo / "src/sample.py"),
+            "--remove-param", "x",
+        ])
+        assert result == 0
+        content = (cli_repo / "src" / "sample.py").read_text()
+        assert "def top_level_fn()" in content
+
     def test_remove(self, cli_repo):
         result = main([
             "edit",

@@ -194,46 +194,78 @@ class Rename(Mutation):
 # AddParam / RemoveParam
 # ---------------------------------------------------------------------------
 
+def _find_first_paren_pair(text: str) -> tuple[int, int] | None:
+    """Find the open/close positions of the first top-level paren pair.
+
+    Returns (open_pos, close_pos) where text[open_pos] == '(' and
+    text[close_pos] == ')'. Respects nested parens inside the group.
+    Returns None if no matching pair is found.
+    """
+    open_pos = text.find("(")
+    if open_pos == -1:
+        return None
+
+    depth = 0
+    for i in range(open_pos, len(text)):
+        c = text[i]
+        if c == "(":
+            depth += 1
+        elif c == ")":
+            depth -= 1
+            if depth == 0:
+                return (open_pos, i)
+    return None
+
+
+def _insert_into_paren_list(text: str, item: str) -> str:
+    """Insert ``item`` at the end of the first paren-delimited list in ``text``.
+
+    Handles empty lists (no leading comma) and non-empty lists (prepend
+    comma and space). Used by both AddParam and AddArg.
+    """
+    pair = _find_first_paren_pair(text)
+    if pair is None:
+        return text
+    open_pos, close_pos = pair
+    params_text = text[open_pos + 1:close_pos].strip()
+    if params_text:
+        insertion = f", {item}"
+    else:
+        insertion = item
+    return text[:close_pos] + insertion + text[close_pos:]
+
+
+def _remove_from_paren_list(text: str, name: str) -> str:
+    """Remove the first parameter or argument matching ``name`` from the
+    first paren-delimited list in ``text``.
+
+    Works for both ``def foo(a, b, c):`` (parameters) and ``foo(a, b, c)``
+    (call-site arguments).
+    """
+    pair = _find_first_paren_pair(text)
+    if pair is None:
+        return text
+    open_pos, close_pos = pair
+    inner = text[open_pos + 1:close_pos]
+    parts = _split_params(inner)
+    kept = [p for p in parts if _param_name(p) != name]
+    new_inner = ", ".join(p.strip() for p in kept)
+    return text[:open_pos + 1] + new_inner + text[close_pos:]
+
+
 class AddParam(Mutation):
     """Add a parameter to a function signature.
 
-    v1 scope: supports Python signatures ``def name(a, b):`` — inserts the
-    new parameter just before the closing parenthesis, respecting whether
-    the existing param list was empty.
+    Finds the first top-level paren pair (the signature's parameter list)
+    and appends ``spec`` just before the closing paren. Handles both empty
+    parameter lists and non-empty ones.
     """
 
     def __init__(self, spec: str) -> None:
         self.spec = spec
 
     def compute(self, node: dict, old_text: str, full_source: str) -> str:
-        # Find the opening and closing parens at paren depth 0 (the signature).
-        # Only operate on the first paren pair so we don't touch nested calls
-        # later in the body.
-        open_pos = old_text.find("(")
-        if open_pos == -1:
-            return old_text
-
-        depth = 0
-        close_pos = -1
-        for i in range(open_pos, len(old_text)):
-            c = old_text[i]
-            if c == "(":
-                depth += 1
-            elif c == ")":
-                depth -= 1
-                if depth == 0:
-                    close_pos = i
-                    break
-
-        if close_pos == -1:
-            return old_text
-
-        params_text = old_text[open_pos + 1:close_pos].strip()
-        if params_text:
-            insertion = f", {self.spec}"
-        else:
-            insertion = self.spec
-        return old_text[:close_pos] + insertion + old_text[close_pos:]
+        return _insert_into_paren_list(old_text, self.spec)
 
 
 class RemoveParam(Mutation):
@@ -243,33 +275,41 @@ class RemoveParam(Mutation):
         self.name = name
 
     def compute(self, node: dict, old_text: str, full_source: str) -> str:
-        open_pos = old_text.find("(")
-        if open_pos == -1:
-            return old_text
+        return _remove_from_paren_list(old_text, self.name)
 
-        depth = 0
-        close_pos = -1
-        for i in range(open_pos, len(old_text)):
-            c = old_text[i]
-            if c == "(":
-                depth += 1
-            elif c == ")":
-                depth -= 1
-                if depth == 0:
-                    close_pos = i
-                    break
-        if close_pos == -1:
-            return old_text
 
-        params_text = old_text[open_pos + 1:close_pos]
+class AddArg(Mutation):
+    """Add an argument to a call expression.
 
-        # Split the parameter list at top-level commas (respecting nested
-        # parens, brackets, braces, and strings), then filter out the
-        # parameter whose leading identifier matches ``self.name``.
-        parts = _split_params(params_text)
-        kept = [p for p in parts if _param_name(p) != self.name]
-        new_params = ", ".join(p.strip() for p in kept)
-        return old_text[:open_pos + 1] + new_params + old_text[close_pos:]
+    The mutation targets should be call nodes (``.call``). The expression
+    can be a positional value (``42``, ``user_id``) or a keyword argument
+    (``timeout=30``). Inserts at the end of the argument list.
+
+    Use with ``Selection.find('.call#foo').addArg('timeout=timeout')`` to
+    propagate a new argument through every call site, typically paired
+    with ``addParam`` on the function definition.
+    """
+
+    def __init__(self, expr: str) -> None:
+        self.expr = expr
+
+    def compute(self, node: dict, old_text: str, full_source: str) -> str:
+        return _insert_into_paren_list(old_text, self.expr)
+
+
+class RemoveArg(Mutation):
+    """Remove a keyword argument from a call expression.
+
+    Only works for keyword arguments — positional args are identified by
+    position, not name, so there's no unambiguous way to remove them by
+    name. Use with ``Selection.find('.call#foo').removeArg('timeout')``.
+    """
+
+    def __init__(self, name: str) -> None:
+        self.name = name
+
+    def compute(self, node: dict, old_text: str, full_source: str) -> str:
+        return _remove_from_paren_list(old_text, self.name)
 
 
 def _split_params(text: str) -> list[str]:

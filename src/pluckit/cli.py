@@ -145,12 +145,22 @@ def _build_parser() -> argparse.ArgumentParser:
     ops.add_argument(
         "--add-param",
         metavar="SPEC",
-        help="Add parameter SPEC to matched function signatures",
+        help="Add parameter SPEC to matched function signatures (e.g., 'timeout: int = 30')",
     )
     ops.add_argument(
         "--remove-param",
         metavar="NAME",
         help="Remove parameter NAME from matched function signatures",
+    )
+    ops.add_argument(
+        "--add-arg",
+        metavar="EXPR",
+        help="Add argument EXPR to matched call expressions (e.g., 'timeout=timeout')",
+    )
+    ops.add_argument(
+        "--remove-arg",
+        metavar="NAME",
+        help="Remove keyword argument NAME from matched call expressions",
     )
     ops.add_argument(
         "--rename",
@@ -314,10 +324,12 @@ def _build_mutation_from_args(args: argparse.Namespace):
     Returns (mutation, op_name) for reporting, or (None, '') if none set.
     """
     from pluckit.mutations import (
+        AddArg,
         AddParam,
         Append,
         Prepend,
         Remove,
+        RemoveArg,
         RemoveParam,
         Rename,
         ReplaceWith,
@@ -342,6 +354,10 @@ def _build_mutation_from_args(args: argparse.Namespace):
         return AddParam(args.add_param), "addParam"
     if args.remove_param is not None:
         return RemoveParam(args.remove_param), "removeParam"
+    if args.add_arg is not None:
+        return AddArg(args.add_arg), "addArg"
+    if args.remove_arg is not None:
+        return RemoveArg(args.remove_arg), "removeArg"
     if args.rename is not None:
         return Rename(args.rename), "rename"
     if args.remove:

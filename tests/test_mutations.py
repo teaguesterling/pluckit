@@ -8,10 +8,12 @@ import pytest
 
 from pluckit import Plucker, PluckerError
 from pluckit.mutations import (
+    AddArg,
     AddParam,
     Append,
     Prepend,
     Remove,
+    RemoveArg,
     RemoveParam,
     Rename,
     ReplaceWith,
@@ -182,6 +184,40 @@ class TestRemoveParam:
         assert "def foo(a):" in result
 
 
+class TestAddArg:
+    def test_inserts_in_empty_call(self):
+        m = AddArg("timeout=30")
+        result = m.compute({}, "foo()\n", "")
+        assert result == "foo(timeout=30)\n"
+
+    def test_appends_to_existing_args(self):
+        m = AddArg("timeout=timeout")
+        result = m.compute({}, "foo(a, b)\n", "")
+        assert "foo(a, b, timeout=timeout)" in result
+
+    def test_positional_expression(self):
+        m = AddArg("42")
+        result = m.compute({}, "foo()\n", "")
+        assert "foo(42)" in result
+
+
+class TestRemoveArg:
+    def test_removes_keyword_arg_middle(self):
+        m = RemoveArg("b")
+        result = m.compute({}, "foo(a, b=2, c=3)\n", "")
+        assert "foo(a, c=3)" in result
+
+    def test_removes_trailing_keyword_arg(self):
+        m = RemoveArg("timeout")
+        result = m.compute({}, "foo(url, timeout=30)\n", "")
+        assert "foo(url)" in result
+
+    def test_removes_leading_arg(self):
+        m = RemoveArg("a")
+        result = m.compute({}, "foo(a, b)\n", "")
+        assert "foo(b)" in result
+
+
 # ---------------------------------------------------------------------------
 # End-to-end mutation tests via Plucker
 # ---------------------------------------------------------------------------
@@ -246,6 +282,30 @@ class TestEndToEndRemoveParam:
         pluck.find(".fn#process_data").removeParam("items")
         content = (mut_repo / "src" / "app.py").read_text()
         assert "def process_data():" in content or "def process_data ():" in content
+
+
+class TestEndToEndAddArg:
+    def test_add_arg_to_call(self, pluck, mut_repo):
+        # Create a fresh file with a clear call site
+        (mut_repo / "src" / "caller.py").write_text(
+            "def caller():\n    return greet('world')\n"
+        )
+        pluck2 = Plucker(code=str(mut_repo / "src/caller.py"))
+        pluck2.find(".call#greet").addArg("timeout=30")
+        content = (mut_repo / "src" / "caller.py").read_text()
+        assert "greet('world', timeout=30)" in content
+
+
+class TestEndToEndRemoveArg:
+    def test_remove_keyword_arg(self, pluck, mut_repo):
+        (mut_repo / "src" / "caller.py").write_text(
+            "def caller():\n    return fetch(url='x', timeout=30)\n"
+        )
+        pluck2 = Plucker(code=str(mut_repo / "src/caller.py"))
+        pluck2.find(".call#fetch").removeArg("timeout")
+        content = (mut_repo / "src" / "caller.py").read_text()
+        assert "fetch(url='x')" in content
+        assert "timeout=30" not in content
 
 
 class TestTransactionRollback:

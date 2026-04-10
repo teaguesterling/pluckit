@@ -501,6 +501,23 @@ class Selection:
         from pluckit.mutations import RemoveParam
         return MutationEngine(self._ctx).apply(self, RemoveParam(param))
 
+    def addArg(self, expr: str) -> Selection:
+        """Add an argument to matched call expressions.
+
+        Pairs with addParam: after adding a parameter to a function, use
+        ``.callers().find('.call#name').addArg('name=name')`` to propagate
+        the argument through every call site.
+        """
+        from pluckit.mutation import MutationEngine
+        from pluckit.mutations import AddArg
+        return MutationEngine(self._ctx).apply(self, AddArg(expr))
+
+    def removeArg(self, name: str) -> Selection:
+        """Remove a keyword argument from matched call expressions."""
+        from pluckit.mutation import MutationEngine
+        from pluckit.mutations import RemoveArg
+        return MutationEngine(self._ctx).apply(self, RemoveArg(name))
+
     def rename(self, new_name: str) -> Selection:
         """Rename matched definitions (name occurrence only in v1)."""
         from pluckit.mutation import MutationEngine

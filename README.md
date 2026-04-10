@@ -80,6 +80,15 @@ pluckit edit ".fn#validate" --replace "return None" "raise ValueError()" src/*.p
 # Add a parameter to every matched function
 pluckit edit ".fn:exported" --add-param "timeout: int = 30" src/**/*.py
 
+# Remove a parameter by name
+pluckit edit ".fn#fetch_user" --remove-param "cache" src/*.py
+
+# Add a keyword argument at every call site (paired with --add-param above)
+pluckit edit ".call#fetch_user" --add-arg "timeout=timeout" src/**/*.py
+
+# Remove a keyword argument from every call site
+pluckit edit ".call#fetch_user" --remove-arg "cache" src/**/*.py
+
 # Remove matched nodes entirely
 pluckit edit ".fn#deprecated_helper" --remove src/*.py
 
