@@ -2,7 +2,7 @@
 from pluckit.plucker import Plucker
 from pluckit.plugins.base import Plugin, PluginRegistry
 from pluckit.plugins.viewer import AstViewer
-from pluckit.types import PluckerError, NodeInfo, DiffResult, InterfaceInfo
+from pluckit.types import DiffResult, InterfaceInfo, NodeInfo, PluckerError
 
 
 def view(query: str, *, code: str = "**/*", format: str = "markdown") -> str:

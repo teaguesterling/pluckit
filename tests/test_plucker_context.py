@@ -1,6 +1,6 @@
 """Tests for Plucker: connection lifecycle and extension loading."""
 import duckdb
-import pytest
+
 from pluckit import Plucker
 
 

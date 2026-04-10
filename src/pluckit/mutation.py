@@ -94,7 +94,7 @@ class MutationEngine:
                 f"FROM {view} ORDER BY file_path, node_id"
             ).fetchall()
             cols = ["file_path", "start_line", "end_line", "type", "name", "language", "node_id"]
-            return [dict(zip(cols, row)) for row in rows]
+            return [dict(zip(cols, row, strict=True)) for row in rows]
         finally:
             try:
                 selection._unregister(view)
@@ -108,7 +108,7 @@ class MutationEngine:
         descendants match. Uses pluckit's selector compiler + a DFS range
         check so the anchor is scoped to the parent's subtree.
         """
-        from pluckit._sql import _selector_to_where, _esc
+        from pluckit._sql import _esc, _selector_to_where
 
         where = _selector_to_where(anchor_selector)
         file_path = _esc(node["file_path"])

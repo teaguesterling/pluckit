@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import textwrap
-from pathlib import Path
 
 import pytest
 
@@ -12,8 +11,6 @@ from pluckit.mutations import (
     AddParam,
     Append,
     ClearBody,
-    InsertAfter,
-    InsertBefore,
     Prepend,
     Remove,
     RemoveArg,
@@ -21,10 +18,8 @@ from pluckit.mutations import (
     Rename,
     ReplaceWith,
     ScopedReplace,
-    Unwrap,
     Wrap,
 )
-
 
 SAMPLE = textwrap.dedent("""\
     def greet(name: str) -> str:

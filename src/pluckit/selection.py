@@ -13,9 +13,9 @@ from typing import TYPE_CHECKING, Any
 
 import duckdb
 
-from pluckit._sql import _esc, _selector_to_where, descendant_join, read_ast_sql
+from pluckit._sql import _esc, _selector_to_where, descendant_join
 from pluckit.plugins.base import PluginRegistry
-from pluckit.types import NodeInfo, PluckerError
+from pluckit.types import PluckerError
 
 if TYPE_CHECKING:
     from pluckit._context import _Context as Context
@@ -466,7 +466,7 @@ class Selection:
             rows = rel.fetchall()
         finally:
             self._unregister(view)
-        return [dict(zip(cols, row)) for row in rows]
+        return [dict(zip(cols, row, strict=True)) for row in rows]
 
     # ---------------------------------------------------------------
     # Mutation stubs — delegate to MutationEngine (Task 6)

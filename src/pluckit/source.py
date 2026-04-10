@@ -31,8 +31,8 @@ class Source:
 
     def find(self, selector: str) -> Selection:
         """Find AST nodes matching selector within these source files."""
-        from pluckit.selection import Selection
         from pluckit._sql import ast_select_sql
+        from pluckit.selection import Selection
 
         sql = ast_select_sql(self._resolved_glob, selector)
         rel = self._ctx.db.sql(sql)

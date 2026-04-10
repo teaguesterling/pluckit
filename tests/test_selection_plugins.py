@@ -3,13 +3,12 @@
 import os
 
 import pytest
-import duckdb
 
 from pluckit._context import _Context
+from pluckit._sql import ast_select_sql
 from pluckit.plugins.base import Plugin, PluginRegistry
 from pluckit.selection import Selection
 from pluckit.types import PluckerError
-from pluckit._sql import ast_select_sql
 
 
 class CountPlugin(Plugin):

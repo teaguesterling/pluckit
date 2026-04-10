@@ -643,7 +643,7 @@ class AstViewer(Plugin):
             result = selection._ctx.db.sql(
                 f"SELECT {col_list} FROM {view} ORDER BY file_path, node_id"
             ).fetchall()
-            return [dict(zip(columns, row)) for row in result]
+            return [dict(zip(columns, row, strict=True)) for row in result]
         finally:
             try:
                 selection._unregister(view)
@@ -769,7 +769,7 @@ class AstViewer(Plugin):
         cols = ["node_id", "type", "name", "start_line", "end_line", "language",
                 "signature_type", "parameters", "modifiers", "annotations", "peek"]
         for row in children:
-            child = dict(zip(cols, row))
+            child = dict(zip(cols, row, strict=True))
             c_type = child["type"]
             if c_type in ("function_definition", "method_definition", "function_declaration"):
                 sig = _synthesize_signature(child)

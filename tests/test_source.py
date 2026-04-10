@@ -1,8 +1,6 @@
 # tests/test_source.py
 """Tests for Source type."""
-import pytest
 
-from pluckit.source import Source
 
 
 def test_source_stores_glob(ctx):

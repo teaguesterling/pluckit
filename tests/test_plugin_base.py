@@ -7,7 +7,6 @@ import pytest
 from pluckit.plugins import Plugin, PluginRegistry
 from pluckit.types import PluckerError
 
-
 # ---------------------------------------------------------------------------
 # Dummy plugins used across multiple tests
 # ---------------------------------------------------------------------------

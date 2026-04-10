@@ -3,9 +3,7 @@ from __future__ import annotations
 
 import re
 from collections import defaultdict
-from dataclasses import dataclass, field
-from typing import Optional
-
+from dataclasses import dataclass
 
 # ---------------------------------------------------------------------------
 # Alias table
@@ -204,7 +202,7 @@ def resolve_alias(selector_part: str) -> str:
 class PseudoClassEntry:
     name: str
     engine: str
-    sql_template: Optional[str] = None
+    sql_template: str | None = None
     takes_arg: bool = False
 
 
@@ -338,7 +336,7 @@ class PseudoClassRegistry:
         self,
         name: str,
         engine: str,
-        sql_template: Optional[str] = None,
+        sql_template: str | None = None,
         takes_arg: bool = False,
     ) -> None:
         """Register a custom pseudo-class."""
@@ -349,7 +347,7 @@ class PseudoClassRegistry:
             takes_arg=takes_arg,
         )
 
-    def get(self, name: str) -> Optional[PseudoClassEntry]:
+    def get(self, name: str) -> PseudoClassEntry | None:
         """Return the entry for *name*, or None if unknown."""
         return self._entries.get(name)
 

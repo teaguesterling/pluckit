@@ -1,8 +1,7 @@
 """Shared fixtures for pluckit tests."""
 import textwrap
-from pathlib import Path
-import pytest
 
+import pytest
 
 SAMPLE_AUTH = textwrap.dedent("""\
     import json

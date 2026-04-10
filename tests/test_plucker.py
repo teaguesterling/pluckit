@@ -1,9 +1,11 @@
 import textwrap
+
 import duckdb
 import pytest
+
 from pluckit.plucker import Plucker
-from pluckit.types import PluckerError
 from pluckit.plugins.base import Plugin
+from pluckit.types import PluckerError
 
 
 @pytest.fixture

@@ -2,19 +2,16 @@
 from __future__ import annotations
 
 import warnings
-from pathlib import Path
 
 import pytest
 
-from pluckit import Plucker, AstViewer, PluckerError
+from pluckit import AstViewer, Plucker, PluckerError
 from pluckit.plugins.viewer import (
-    Rule,
-    parse_viewer_query,
     _default_show,
     _extract_body,
     _extract_signature,
+    parse_viewer_query,
 )
-
 
 # ---------------------------------------------------------------------------
 # Parser tests

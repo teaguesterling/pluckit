@@ -1,4 +1,5 @@
 from __future__ import annotations
+
 from typing import TYPE_CHECKING
 
 from pluckit._context import _Context
@@ -8,6 +9,7 @@ from pluckit.types import PluckerError
 
 if TYPE_CHECKING:
     import duckdb
+
     from pluckit.selection import Selection
     from pluckit.source import Source
 

@@ -1,7 +1,6 @@
 """Tests for selector alias resolution and pseudo-class registry."""
-import pytest
 
-from pluckit.selectors import resolve_alias, PseudoClassRegistry, ALIASES
+from pluckit.selectors import PseudoClassRegistry, resolve_alias
 
 
 class TestAliases:

@@ -2,8 +2,6 @@
 """Tests for Selection: query chaining, navigation, filter, and terminal ops."""
 import pytest
 
-from pluckit.selection import Selection
-
 
 class TestTerminalOps:
     def test_count(self, ctx):
