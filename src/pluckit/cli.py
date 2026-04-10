@@ -26,7 +26,6 @@ from __future__ import annotations
 
 import argparse
 import difflib
-import os
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -233,16 +232,11 @@ def _cmd_find(argv: list[str]) -> int:
 
         cols = ["file_path", "start_line", "end_line", "name", "type",
                 "language", "signature_type", "parameters", "modifiers", "annotations"]
+        from pluckit._paths import display_path
+
         for row in fetched:
             node = dict(zip(cols, row, strict=True))
-            if args.repo:
-                repo = args.repo
-            else:
-                repo = os.getcwd()
-            try:
-                node["rel_path"] = os.path.relpath(node["file_path"], repo)
-            except ValueError:
-                node["rel_path"] = node["file_path"]
+            node["rel_path"] = display_path(node["file_path"], args.repo)
             rows.append(node)
             total += 1
 
@@ -645,10 +639,8 @@ def _apply_mutation_to_snapshots(engine, selection, mutation, snapshots, pluck) 
 
 
 def _relpath(fp: str, repo: str | None) -> str:
-    try:
-        return os.path.relpath(fp, repo or os.getcwd())
-    except ValueError:
-        return fp
+    from pluckit._paths import display_path
+    return display_path(fp, repo)
 
 
 # ---------------------------------------------------------------------------

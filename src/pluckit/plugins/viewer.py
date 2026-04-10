@@ -25,7 +25,6 @@ queries in Python and dispatches per-rule through the existing Plucker API.
 """
 from __future__ import annotations
 
-import os
 import warnings
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
@@ -835,11 +834,9 @@ class AstViewer(Plugin):
         return None
 
     def _relpath(self, plucker: Plucker, file_path: str) -> str:
-        """Return a repo-relative path if possible, else absolute."""
-        try:
-            return os.path.relpath(file_path, plucker._ctx.repo)
-        except ValueError:
-            return file_path
+        """Return a short, human-readable path for display."""
+        from pluckit._paths import display_path
+        return display_path(file_path, plucker._ctx.repo)
 
 
 def _esc(s: str) -> str:
