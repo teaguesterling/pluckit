@@ -32,7 +32,6 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-
 # ---------------------------------------------------------------------------
 # view subcommand (unchanged)
 # ---------------------------------------------------------------------------
@@ -190,6 +189,7 @@ def _build_find_parser() -> argparse.ArgumentParser:
 
 def _cmd_find(argv: list[str]) -> int:
     import json as _json
+
     from pluckit import Plucker
     from pluckit.plugins.viewer import AstViewer
     from pluckit.types import PluckerError
@@ -234,7 +234,7 @@ def _cmd_find(argv: list[str]) -> int:
         cols = ["file_path", "start_line", "end_line", "name", "type",
                 "language", "signature_type", "parameters", "modifiers", "annotations"]
         for row in fetched:
-            node = dict(zip(cols, row))
+            node = dict(zip(cols, row, strict=True))
             if args.repo:
                 repo = args.repo
             else:
@@ -664,11 +664,7 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     if argv[0] == "--version":
-        try:
-            from importlib.metadata import version
-            print(f"pluckit {version('pluckit')}")
-        except Exception:
-            print("pluckit (unknown version)")
+        print(f"pluckit {_package_version()}")
         return 0
 
     command = argv[0]
@@ -680,10 +676,22 @@ def main(argv: list[str] | None = None) -> int:
         return _cmd_find(rest)
     if command == "edit":
         return _cmd_edit(rest)
+    if command == "init":
+        return _cmd_init(rest)
 
     print(f"pluckit: unknown command {command!r}", file=sys.stderr)
     _print_top_help()
     return 2
+
+
+def _package_version() -> str:
+    from importlib.metadata import PackageNotFoundError, version
+    for dist in ("ast-pluckit", "pluckit"):
+        try:
+            return version(dist)
+        except PackageNotFoundError:
+            continue
+    return "unknown"
 
 
 def _print_top_help() -> None:
@@ -693,6 +701,7 @@ usage: pluckit COMMAND [options] ...
 Query, view, and edit source code with CSS selectors.
 
 Commands:
+  init     Install and verify the required DuckDB extensions
   view     Render matched code regions as markdown
   find     List matches (locations, names, signatures, or JSON)
   edit     Apply structural edits to matched nodes
@@ -703,6 +712,102 @@ Options:
 
 Run `pluckit COMMAND --help` for command-specific options.
 """)
+
+
+# ---------------------------------------------------------------------------
+# init subcommand — install and verify DuckDB extensions
+# ---------------------------------------------------------------------------
+
+def _cmd_init(argv: list[str]) -> int:
+    """Install sitting_duck (and optionally duck_tails) and verify they load.
+
+    This eagerly performs what ``_Context._ensure_extensions`` does lazily on
+    first use, and reports clearly actionable errors rather than letting a
+    raw DuckDB exception bubble up mid-query.
+    """
+    parser = argparse.ArgumentParser(
+        prog="pluckit init",
+        description=(
+            "Install and verify the DuckDB community extensions that pluckit "
+            "depends on. Safe to re-run; already-installed extensions are "
+            "only re-verified."
+        ),
+    )
+    parser.add_argument(
+        "--force-reinstall",
+        action="store_true",
+        help="Re-install extensions even if they already load",
+    )
+    parser.add_argument(
+        "--quiet",
+        action="store_true",
+        help="Suppress success messages; only print errors",
+    )
+    args = parser.parse_args(argv)
+
+    try:
+        import duckdb
+    except ImportError:
+        print(
+            "pluckit init: duckdb is not installed. Run "
+            "`pip install 'ast-pluckit'` to pull it in as a dependency.",
+            file=sys.stderr,
+        )
+        return 1
+
+    extensions = [
+        ("sitting_duck", True),   # required
+        ("duck_tails", False),    # optional (v0.2 History plugin)
+    ]
+
+    conn = duckdb.connect()
+    failures: list[tuple[str, str]] = []
+
+    for ext, required in extensions:
+        label = "required" if required else "optional"
+        try:
+            if args.force_reinstall:
+                conn.sql(f"INSTALL {ext} FROM community")
+            conn.sql(f"LOAD {ext}")
+            if not args.quiet:
+                print(f"  {ext} ({label}): loaded")
+        except duckdb.Error:
+            try:
+                conn.sql(f"INSTALL {ext} FROM community")
+                conn.sql(f"LOAD {ext}")
+                if not args.quiet:
+                    print(f"  {ext} ({label}): installed and loaded")
+            except duckdb.Error as e:
+                failures.append((ext, str(e)))
+                print(
+                    f"  {ext} ({label}): FAILED — {e}",
+                    file=sys.stderr,
+                )
+
+    if failures:
+        required_failed = [ext for ext, _ in failures if any(
+            ext == e and req for e, req in extensions)]
+        if required_failed:
+            print(
+                "\npluckit init: required extensions could not be installed: "
+                f"{', '.join(required_failed)}.\n"
+                "Check that your DuckDB build supports community extensions "
+                "and that you have network access to install from the "
+                "community repository.",
+                file=sys.stderr,
+            )
+            return 1
+        if not args.quiet:
+            print(
+                "\npluckit init: required extensions installed. "
+                "Optional extensions unavailable — some plugins will be disabled.",
+                file=sys.stderr,
+            )
+        return 0
+
+    if not args.quiet:
+        print("\npluckit init: all extensions ready.")
+    return 0
 
 
 if __name__ == "__main__":

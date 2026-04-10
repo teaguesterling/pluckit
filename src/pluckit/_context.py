@@ -8,8 +8,8 @@ from typing import TYPE_CHECKING
 import duckdb
 
 if TYPE_CHECKING:
-    from pluckit.source import Source
     from pluckit.selection import Selection
+    from pluckit.source import Source
 
 
 class _Context:
@@ -33,15 +33,34 @@ class _Context:
         self._ensure_extensions()
 
     def _ensure_extensions(self) -> None:
-        """Load sitting_duck and duck_tails extensions (idempotent)."""
+        """Load sitting_duck and duck_tails extensions (idempotent).
+
+        sitting_duck is required; duck_tails is optional (powers the v0.2
+        History plugin). If sitting_duck cannot be installed, we raise a
+        PluckerError with a hint to run ``pluckit init`` for diagnostics
+        rather than letting a raw DuckDB error bubble up mid-query.
+        """
         if self._extensions_loaded:
             return
-        for ext in ("sitting_duck", "duck_tails"):
+        from pluckit.types import PluckerError
+
+        for ext, required in (("sitting_duck", True), ("duck_tails", False)):
             try:
                 self.db.sql(f"LOAD {ext}")
+                continue
             except duckdb.Error:
+                pass
+            try:
                 self.db.sql(f"INSTALL {ext} FROM community")
                 self.db.sql(f"LOAD {ext}")
+            except duckdb.Error as e:
+                if required:
+                    raise PluckerError(
+                        f"Failed to install the required DuckDB extension "
+                        f"{ext!r} from the community repository: {e}. "
+                        f"Run `pluckit init` to diagnose."
+                    ) from e
+                # Optional extension unavailable — continue silently.
         self._extensions_loaded = True
 
     def source(self, glob: str) -> Source:

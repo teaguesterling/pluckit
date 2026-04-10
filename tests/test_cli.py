@@ -2,13 +2,10 @@
 from __future__ import annotations
 
 import io
-import sys
-from pathlib import Path
 
 import pytest
 
-from pluckit.cli import _read_query, _normalize_view_args, _parse_edit_argv, main
-
+from pluckit.cli import _normalize_view_args, _parse_edit_argv, _read_query, main
 
 SAMPLE_CODE = '''\
 def top_level_fn(x):
@@ -543,7 +540,7 @@ class TestCliFind:
             str(cli_repo / "src/sample.py"),
         ])
         assert result == 0
-        lines = [l for l in capsys.readouterr().out.strip().splitlines() if l]
+        lines = [line for line in capsys.readouterr().out.strip().splitlines() if line]
         assert len(lines) == 1
         obj = _json.loads(lines[0])
         assert obj["name"] == "top_level_fn"
@@ -570,3 +567,23 @@ class TestCliFind:
         ])
         assert result == 0
         assert capsys.readouterr().out == ""
+
+
+class TestCliInit:
+    def test_init_success(self, capsys):
+        # The dev environment already has extensions installed
+        result = main(["init"])
+        assert result == 0
+        out = capsys.readouterr().out
+        assert "sitting_duck" in out
+        assert "all extensions ready" in out
+
+    def test_init_quiet(self, capsys):
+        result = main(["init", "--quiet"])
+        assert result == 0
+        assert capsys.readouterr().out == ""
+
+    def test_version(self, capsys):
+        result = main(["--version"])
+        assert result == 0
+        assert "pluckit" in capsys.readouterr().out
