@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from pluckit.cli import _read_query, _normalize_positional_args, main
+from pluckit.cli import _read_query, _normalize_view_args, _parse_edit_argv, main
 
 
 SAMPLE_CODE = '''\
@@ -66,25 +66,25 @@ class TestReadQuery:
             _read_query(None, None)
 
 
-class TestNormalizePositionalArgs:
+class TestNormalizeViewArgs:
     def test_no_query_file_no_change(self):
         import argparse
         args = argparse.Namespace(query=".fn", paths=["src/*.py"], query_file=None)
-        _normalize_positional_args(args)
+        _normalize_view_args(args)
         assert args.query == ".fn"
         assert args.paths == ["src/*.py"]
 
     def test_query_file_shifts_positional(self):
         import argparse
         args = argparse.Namespace(query="src/*.py", paths=[], query_file="q.txt")
-        _normalize_positional_args(args)
+        _normalize_view_args(args)
         assert args.query is None
         assert args.paths == ["src/*.py"]
 
     def test_query_file_with_multiple_paths(self):
         import argparse
         args = argparse.Namespace(query="a.py", paths=["b.py"], query_file="q.txt")
-        _normalize_positional_args(args)
+        _normalize_view_args(args)
         assert args.query is None
         assert args.paths == ["a.py", "b.py"]
 
@@ -182,9 +182,10 @@ class TestCliView:
             main(["view"])
 
     def test_help_flag(self, capsys):
-        with pytest.raises(SystemExit) as exc:
-            main(["--help"])
-        assert exc.value.code == 0
+        result = main(["--help"])
+        assert result == 0
+        captured = capsys.readouterr()
+        assert "pluckit" in captured.out
 
     def test_version_flag(self, capsys):
         result = main(["--version"])
@@ -304,14 +305,16 @@ class TestCliEdit:
         ])
         assert result == 0
 
-    def test_requires_mutation_flag(self, cli_repo):
-        # argparse exits with 2 when a required mutually-exclusive group is missing
-        with pytest.raises(SystemExit):
-            main([
-                "edit",
-                ".fn#top_level_fn",
-                str(cli_repo / "src/sample.py"),
-            ])
+    def test_requires_mutation_flag(self, cli_repo, capsys):
+        # With no operations, main() returns 2 and prints an error
+        result = main([
+            "edit",
+            ".fn#top_level_fn",
+            str(cli_repo / "src/sample.py"),
+        ])
+        assert result == 2
+        captured = capsys.readouterr()
+        assert "no operations" in captured.err
 
     def test_multiple_paths(self, cli_repo):
         # Create a second file
@@ -321,10 +324,249 @@ class TestCliEdit:
         result = main([
             "edit",
             ".fn#top_level_fn",
+            "--rename", "renamed",
             str(cli_repo / "src/sample.py"),
             str(cli_repo / "src/other.py"),
-            "--rename", "renamed",
         ])
         assert result == 0
         assert "def renamed" in (cli_repo / "src" / "sample.py").read_text()
         assert "def renamed" in (cli_repo / "src" / "other.py").read_text()
+
+
+# ---------------------------------------------------------------------------
+# Edit argv parser — unit tests
+# ---------------------------------------------------------------------------
+
+class TestParseEditArgv:
+    def test_single_group_single_op(self):
+        plan = _parse_edit_argv([".fn#foo", "--rename", "bar", "src/*.py"])
+        assert len(plan.groups) == 1
+        assert plan.groups[0].selector == ".fn#foo"
+        assert plan.groups[0].operations == [("rename", "bar")]
+        assert plan.paths == ["src/*.py"]
+        assert plan.dry_run is False
+
+    def test_single_group_multi_ops(self):
+        plan = _parse_edit_argv([
+            ".fn#foo",
+            "--add-param", "x: int",
+            "--append-lines", "self.x = x",
+            "src/*.py",
+        ])
+        assert len(plan.groups) == 1
+        ops = plan.groups[0].operations
+        assert ops[0] == ("addParam", "x: int")
+        assert ops[1] == ("appendLines", "self.x = x")
+
+    def test_multi_group_with_separator(self):
+        plan = _parse_edit_argv([
+            ".fn#foo", "--add-param", "x: int",
+            "--",
+            ".call#foo", "--add-arg", "x=1",
+            "src/*.py",
+        ])
+        assert len(plan.groups) == 2
+        assert plan.groups[0].selector == ".fn#foo"
+        assert plan.groups[0].operations == [("addParam", "x: int")]
+        assert plan.groups[1].selector == ".call#foo"
+        assert plan.groups[1].operations == [("addArg", "x=1")]
+        assert plan.paths == ["src/*.py"]
+
+    def test_dry_run_global_flag(self):
+        plan = _parse_edit_argv([
+            "--dry-run", ".fn#foo", "--remove", "src/*.py",
+        ])
+        assert plan.dry_run is True
+        assert plan.groups[0].selector == ".fn#foo"
+        assert plan.paths == ["src/*.py"]
+
+    def test_replace_takes_two_args(self):
+        plan = _parse_edit_argv([
+            ".fn#foo", "--replace", "old", "new", "src/*.py",
+        ])
+        assert plan.groups[0].operations == [("replace", ("old", "new"))]
+
+    def test_insert_lines_takes_three_args(self):
+        plan = _parse_edit_argv([
+            ".cls#Foo",
+            "--insert-lines", "before", ".fn#bar", "def pre(self): pass",
+            "src/*.py",
+        ])
+        assert plan.groups[0].operations == [
+            ("insertLines", ("before", ".fn#bar", "def pre(self): pass"))
+        ]
+
+    def test_repo_global_flag(self):
+        plan = _parse_edit_argv([
+            "--repo", "/tmp/x",
+            ".fn#foo", "--remove", "src/*.py",
+        ])
+        assert plan.repo == "/tmp/x"
+
+    def test_alias_prepend_append(self):
+        plan = _parse_edit_argv([
+            ".fn#foo",
+            "--prepend", "a = 1",
+            "--append", "b = 2",
+            "src/*.py",
+        ])
+        assert plan.groups[0].operations == [
+            ("prependLines", "a = 1"),
+            ("appendLines", "b = 2"),
+        ]
+
+    def test_unknown_flag_raises(self):
+        with pytest.raises(SystemExit, match="unknown flag"):
+            _parse_edit_argv([".fn#foo", "--nonsense", "src/*.py"])
+
+    def test_empty_trailing_group_dropped(self):
+        plan = _parse_edit_argv([
+            ".fn#foo", "--remove",
+            "--",
+            "src/*.py",
+        ])
+        # The trailing `--` creates an empty group; it should be dropped
+        assert len(plan.groups) == 1
+        assert plan.paths == ["src/*.py"]
+
+
+# ---------------------------------------------------------------------------
+# Chainable edit end-to-end
+# ---------------------------------------------------------------------------
+
+class TestCliChainedEdit:
+    def test_two_ops_one_group(self, cli_repo):
+        result = main([
+            "edit",
+            ".fn#top_level_fn",
+            "--add-param", "debug: bool = False",
+            "--append-lines", "pass  # end",
+            str(cli_repo / "src/sample.py"),
+        ])
+        assert result == 0
+        content = (cli_repo / "src" / "sample.py").read_text()
+        assert "top_level_fn(x, debug: bool = False)" in content
+        assert "pass  # end" in content
+
+    def test_two_groups_with_separator(self, cli_repo):
+        (cli_repo / "src" / "caller.py").write_text(
+            "def run():\n    return top_level_fn(5)\n"
+        )
+        result = main([
+            "edit",
+            ".fn#top_level_fn", "--add-param", "verbose: bool = False",
+            "--",
+            ".call#top_level_fn", "--add-arg", "verbose=True",
+            str(cli_repo / "src/sample.py"),
+            str(cli_repo / "src/caller.py"),
+        ])
+        assert result == 0
+        sample = (cli_repo / "src" / "sample.py").read_text()
+        caller = (cli_repo / "src" / "caller.py").read_text()
+        assert "top_level_fn(x, verbose: bool = False)" in sample
+        assert "top_level_fn(5, verbose=True)" in caller
+
+
+class TestCliEditDryRunDiff:
+    def test_dry_run_emits_unified_diff(self, cli_repo, capsys):
+        original = (cli_repo / "src" / "sample.py").read_text()
+        result = main([
+            "edit",
+            "--dry-run",
+            ".fn#top_level_fn", "--rename", "renamed_fn",
+            str(cli_repo / "src/sample.py"),
+        ])
+        assert result == 0
+        # File unchanged
+        assert (cli_repo / "src" / "sample.py").read_text() == original
+        captured = capsys.readouterr()
+        # Diff appears in stdout
+        assert "-def top_level_fn" in captured.out
+        assert "+def renamed_fn" in captured.out
+        # Summary appears in stderr
+        assert "dry-run" in captured.err
+
+
+# ---------------------------------------------------------------------------
+# find subcommand
+# ---------------------------------------------------------------------------
+
+class TestCliFind:
+    def test_locations_format(self, cli_repo, capsys):
+        result = main([
+            "find",
+            ".fn",
+            str(cli_repo / "src/sample.py"),
+        ])
+        assert result == 0
+        out = capsys.readouterr().out
+        # Each line is file:line:name
+        assert "top_level_fn" in out
+        assert "main" in out
+        assert "__init__" in out
+        # Each row has the form path:LINE:name
+        for line in out.strip().splitlines():
+            parts = line.rsplit(":", 2)
+            assert len(parts) == 3
+            assert parts[1].isdigit()
+
+    def test_names_format(self, cli_repo, capsys):
+        result = main([
+            "find",
+            ".fn",
+            "--format", "names",
+            str(cli_repo / "src/sample.py"),
+        ])
+        assert result == 0
+        names = set(capsys.readouterr().out.strip().splitlines())
+        assert "top_level_fn" in names
+        assert "main" in names
+
+    def test_signature_format(self, cli_repo, capsys):
+        result = main([
+            "find",
+            ".fn#top_level_fn",
+            "--format", "signature",
+            str(cli_repo / "src/sample.py"),
+        ])
+        assert result == 0
+        out = capsys.readouterr().out
+        assert "| File | Lines | Signature |" in out
+        assert "top_level_fn" in out
+
+    def test_json_format(self, cli_repo, capsys):
+        import json as _json
+        result = main([
+            "find",
+            ".fn#top_level_fn",
+            "--format", "json",
+            str(cli_repo / "src/sample.py"),
+        ])
+        assert result == 0
+        lines = [l for l in capsys.readouterr().out.strip().splitlines() if l]
+        assert len(lines) == 1
+        obj = _json.loads(lines[0])
+        assert obj["name"] == "top_level_fn"
+        assert "start_line" in obj
+        assert "end_line" in obj
+
+    def test_count_flag(self, cli_repo, capsys):
+        result = main([
+            "find",
+            ".fn",
+            "--count",
+            str(cli_repo / "src/sample.py"),
+        ])
+        assert result == 0
+        out = capsys.readouterr().out.strip()
+        assert out.isdigit()
+        assert int(out) >= 3  # top_level_fn, __init__, main
+
+    def test_no_matches_empty_output(self, cli_repo, capsys):
+        result = main([
+            "find",
+            ".fn#does_not_exist",
+            str(cli_repo / "src/sample.py"),
+        ])
+        assert result == 0
+        assert capsys.readouterr().out == ""
