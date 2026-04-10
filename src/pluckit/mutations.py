@@ -102,7 +102,15 @@ class Prepend(Mutation):
 
 
 class Append(Mutation):
-    """Insert code at the bottom of a node's body, at the body's indent level."""
+    """Insert code at the bottom of a node's body at the *body frame* indent.
+
+    The body frame indent is the shallowest indent among the body's
+    structural statements — ignoring deeply-nested lines (like inside a
+    method body) and trailing closing braces. This puts new methods at
+    class-body level on a class, new statements at function-body level
+    on a function, and correctly places content before the closing ``}``
+    on brace-delimited languages.
+    """
 
     def __init__(self, code: str) -> None:
         self.code = code
@@ -110,14 +118,16 @@ class Append(Mutation):
     def compute(self, node: dict, old_text: str, full_source: str) -> str:
         text = old_text.rstrip("\n")
         lines = text.split("\n")
-        # Find the body's indentation — use the last non-empty line's indent
-        body_indent = "    "
-        for line in reversed(lines):
-            if line.strip():
-                body_indent = _leading_indent(line)
-                break
+        if not lines:
+            return old_text
+
+        body_indent = _find_body_frame_indent(lines)
         new_block = _reindent(self.code, body_indent)
-        lines.append(new_block)
+
+        # For brace-delimited bodies, insert BEFORE any trailing closing
+        # brace line so the new content stays inside the block.
+        insert_at = _find_append_insertion_index(lines)
+        lines.insert(insert_at, new_block)
         return "\n".join(lines)
 
 
@@ -165,6 +175,54 @@ class Remove(Mutation):
 
     def compute(self, node: dict, old_text: str, full_source: str) -> str:
         return ""
+
+
+class ClearBody(Mutation):
+    """Clear the body of a function or class, keeping only the signature.
+
+    - Python / Ruby: body replaced with ``pass``.
+    - C-family (C, C++, Java, Go, Rust, TypeScript, ...): body emptied
+      but the opening ``{`` on the signature line and the closing ``}``
+      on the last line are preserved.
+    """
+
+    _PYTHON_FAMILY = frozenset({"python", "ruby"})
+    _BRACE_FAMILY = frozenset({
+        "c", "cpp", "c++", "java", "javascript", "typescript",
+        "go", "rust", "csharp", "c#", "kotlin", "swift", "scala", "php",
+    })
+
+    def compute(self, node: dict, old_text: str, full_source: str) -> str:
+        language = (node.get("language") or "").lower()
+        stripped = old_text.rstrip("\n")
+        lines = stripped.split("\n")
+        if not lines:
+            return old_text
+
+        signature_indent = _leading_indent(lines[0])
+        body_indent = signature_indent + "    "
+        body_start = _find_body_start(lines)
+
+        if language in self._PYTHON_FAMILY or (not language and lines[0].rstrip().endswith(":")):
+            # Python-style: replace body lines with `pass`
+            sig_lines = lines[:body_start]
+            return "\n".join(sig_lines + [f"{body_indent}pass"])
+
+        if language in self._BRACE_FAMILY or "{" in lines[0]:
+            # C-family: signature line has `{`. Preserve it and the closing `}`
+            # on the last line. Clear everything between.
+            sig_lines = lines[:body_start]
+            # The closing brace is typically the last line of the node
+            last_line = lines[-1].rstrip()
+            if last_line.lstrip().startswith("}"):
+                close_line = lines[-1]
+                return "\n".join(sig_lines + [close_line])
+            # No clear closing brace — collapse the body inline
+            return sig_lines[0] + "}" if lines[0].rstrip().endswith("{") else "\n".join(sig_lines)
+
+        # Unknown language — leave unchanged with a safe fallback
+        sig_lines = lines[:body_start]
+        return "\n".join(sig_lines + [f"{body_indent}// body cleared"])
 
 
 # ---------------------------------------------------------------------------
@@ -419,6 +477,69 @@ def _reindent(code: str, indent: str) -> str:
         else:
             result.append(line)
     return "\n".join(result)
+
+
+_CLOSING_BRACE_LINES = frozenset({"}", "};", ");", "]", "];", ")", "});"})
+
+
+def _is_closing_brace_line(line: str) -> bool:
+    """Return True if the line's stripped content is purely a closing brace/bracket."""
+    return line.strip() in _CLOSING_BRACE_LINES
+
+
+def _find_body_frame_indent(lines: list[str]) -> str:
+    """Find the indent of the body's top-level statements (the body frame).
+
+    Scans past the signature line (first line ending with ``:`` or ``{``)
+    and returns the shallowest non-empty indent among the body lines,
+    ignoring trailing closing braces. This gives the correct indent for
+    adding a new sibling statement inside the body (e.g., a new method
+    in a class, a new statement in a function).
+
+    Falls back to ``signature_indent + 4`` if no body lines are found.
+    """
+    if not lines:
+        return "    "
+
+    signature_indent = _leading_indent(lines[0])
+    fallback = signature_indent + "    "
+
+    body_start = _find_body_start(lines)
+    if body_start >= len(lines):
+        return fallback
+
+    shallowest: str | None = None
+    for line in lines[body_start:]:
+        if not line.strip():
+            continue
+        # Skip closing braces — they're structural, not body content
+        if _is_closing_brace_line(line):
+            continue
+        indent = _leading_indent(line)
+        if len(indent) <= len(signature_indent):
+            continue
+        if shallowest is None or len(indent) < len(shallowest):
+            shallowest = indent
+    return shallowest if shallowest is not None else fallback
+
+
+def _find_append_insertion_index(lines: list[str]) -> int:
+    """Return the line index where ``Append`` should insert new code.
+
+    For brace-delimited bodies, this is the index of the closing ``}``
+    line (so the new code lands before it, still inside the block).
+    For Python-style bodies with no explicit closing marker, this is
+    the end of the list.
+    """
+    # Walk backwards past blank lines to find the last non-blank line
+    for i in range(len(lines) - 1, -1, -1):
+        line = lines[i]
+        if not line.strip():
+            continue
+        if _is_closing_brace_line(line):
+            return i
+        return len(lines)
+    return len(lines)
 
 
 def _find_body_start(lines: list[str]) -> int:
