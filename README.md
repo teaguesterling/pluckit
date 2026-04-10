@@ -92,11 +92,21 @@ pluckit edit ".call#fetch_user" --remove-arg "cache" src/**/*.py
 # Remove matched nodes entirely
 pluckit edit ".fn#deprecated_helper" --remove src/*.py
 
+# Clear a function/class body to `pass` (Python) or `{}` (C-family)
+pluckit edit ".fn#todo_later" --clear-body src/*.py
+
 # Rename a definition (first name occurrence)
 pluckit edit ".fn#old_name" --rename "new_name" src/*.py
 
-# Insert code at the top of matched function bodies
-pluckit edit ".fn:exported" --prepend "logger.debug('entered')" src/*.py
+# Insert lines at the top/bottom of matched function bodies
+pluckit edit ".fn:exported" --prepend-lines "logger.debug('entered')" src/*.py
+pluckit edit ".fn:exported" --append-lines  "logger.debug('exited')"  src/*.py
+
+# Insert at a specific sibling position — anchor is a CSS selector
+# resolved against each matched node's subtree (exact, not heuristic)
+pluckit edit ".cls#Foo" --insert-lines before ".fn#bar" "def pre_bar(self): pass" src/*.py
+pluckit edit ".cls#Foo" --insert-lines after  ".fn#bar" "def post_bar(self): pass" src/*.py
+pluckit edit ".fn#main" --insert-lines before ".ret" "cleanup()" src/*.py
 
 # Wrap matched nodes
 pluckit edit ".call#query" --wrap "try:" "except DatabaseError:\n    raise" src/*.py
@@ -104,6 +114,14 @@ pluckit edit ".call#query" --wrap "try:" "except DatabaseError:\n    raise" src/
 # See what would change without writing
 pluckit edit ".fn#foo" --remove --dry-run src/*.py
 ```
+
+**Line-level vs character-level edits.** `--prepend-lines`, `--append-lines`,
+and `--insert-lines` all insert whole new lines at indentation-matched
+positions. The 2-arg `--replace OLD NEW` is the character-level equivalent —
+it does a string-level replace within the matched node's text, preserving
+the rest of each line verbatim. `--replace-with` replaces the entire node.
+Character-level `--insert-chars` for inline positional insertions is
+reserved for v0.2.
 
 ## The Python API
 

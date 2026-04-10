@@ -518,6 +518,27 @@ class Selection:
         from pluckit.mutations import RemoveArg
         return MutationEngine(self._ctx).apply(self, RemoveArg(name))
 
+    def insertBefore(self, anchor: str, code: str) -> Selection:
+        """Insert code just before an anchor child within matched nodes.
+
+        ``anchor`` is a CSS selector resolved against each matched node's
+        subtree (the first descendant match wins). The new code takes on
+        the anchor child's indentation and appears on the line before it.
+        """
+        from pluckit.mutation import MutationEngine
+        from pluckit.mutations import InsertBefore
+        return MutationEngine(self._ctx).apply(self, InsertBefore(anchor, code))
+
+    def insertAfter(self, anchor: str, code: str) -> Selection:
+        """Insert code just after an anchor child within matched nodes.
+
+        Same anchor semantics as ``insertBefore``. Code lands on the line
+        after the anchor's end_line at the anchor's indentation.
+        """
+        from pluckit.mutation import MutationEngine
+        from pluckit.mutations import InsertAfter
+        return MutationEngine(self._ctx).apply(self, InsertAfter(anchor, code))
+
     def rename(self, new_name: str) -> Selection:
         """Rename matched definitions (name occurrence only in v1)."""
         from pluckit.mutation import MutationEngine

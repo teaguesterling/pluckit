@@ -121,7 +121,7 @@ class Append(Mutation):
         if not lines:
             return old_text
 
-        body_indent = _find_body_frame_indent(lines)
+        body_indent = _find_body_frame_indent(lines, full_source)
         new_block = _reindent(self.code, body_indent)
 
         # For brace-delimited bodies, insert BEFORE any trailing closing
@@ -175,6 +175,89 @@ class Remove(Mutation):
 
     def compute(self, node: dict, old_text: str, full_source: str) -> str:
         return ""
+
+
+class InsertBefore(Mutation):
+    """Insert code immediately before an anchor within the matched node.
+
+    The anchor is a CSS selector evaluated against the matched node's
+    subtree. The MutationEngine pre-resolves it via a SQL query and
+    passes the child's absolute ``start_line`` and ``end_line`` into
+    compute via the node dict (``_anchor_start_line``,
+    ``_anchor_end_line``). This avoids text heuristics and gives the
+    exact structural location of the anchor.
+
+    Examples:
+    - ``.cls#Foo --insert-before ".fn#bar" "def new(self): pass"``
+      → add a new method on the line just before ``bar`` in Foo
+    - ``.fn#process --insert-before ".ret" "logger.debug('exit')"``
+      → add logging before the (first) return in process()
+
+    If the anchor selector matches no descendants of the parent node,
+    the mutation is a no-op for that node.
+    """
+
+    #: Attribute tag read by the MutationEngine to trigger anchor
+    #: pre-resolution before compute() is called.
+    needs_anchor_resolution = True
+
+    def __init__(self, anchor: str, code: str) -> None:
+        self.anchor = anchor
+        self.code = code
+
+    def compute(self, node: dict, old_text: str, full_source: str) -> str:
+        anchor_start = node.get("_anchor_start_line")
+        if anchor_start is None:
+            return old_text  # Anchor selector matched nothing → no-op
+
+        # Convert the absolute line number to an offset within old_text
+        rel_idx = int(anchor_start) - int(node["start_line"])
+        stripped = old_text.rstrip("\n")
+        lines = stripped.split("\n")
+        if rel_idx < 0 or rel_idx >= len(lines):
+            return old_text
+
+        target_indent = _leading_indent(lines[rel_idx])
+        new_block = _reindent(self.code, target_indent)
+        lines.insert(rel_idx, new_block)
+        return "\n".join(lines)
+
+
+class InsertAfter(Mutation):
+    """Insert code immediately after an anchor within the matched node.
+
+    Same selector semantics as ``InsertBefore``. The new code lands on
+    the line after the anchor child's ``end_line`` at the anchor's
+    indentation. For a multi-line anchor (a whole function, a whole
+    block), the insertion happens after the block's closing line.
+    """
+
+    needs_anchor_resolution = True
+
+    def __init__(self, anchor: str, code: str) -> None:
+        self.anchor = anchor
+        self.code = code
+
+    def compute(self, node: dict, old_text: str, full_source: str) -> str:
+        anchor_end = node.get("_anchor_end_line")
+        anchor_start = node.get("_anchor_start_line")
+        if anchor_end is None or anchor_start is None:
+            return old_text
+
+        # Use the anchor's start line indent for the new code
+        rel_start = int(anchor_start) - int(node["start_line"])
+        rel_end = int(anchor_end) - int(node["start_line"])
+        stripped = old_text.rstrip("\n")
+        lines = stripped.split("\n")
+        if rel_start < 0 or rel_start >= len(lines):
+            return old_text
+
+        target_indent = _leading_indent(lines[rel_start])
+        new_block = _reindent(self.code, target_indent)
+        # Insert at rel_end + 1 (line immediately after the anchor)
+        insert_at = min(rel_end + 1, len(lines))
+        lines.insert(insert_at, new_block)
+        return "\n".join(lines)
 
 
 class ClearBody(Mutation):
@@ -487,7 +570,41 @@ def _is_closing_brace_line(line: str) -> bool:
     return line.strip() in _CLOSING_BRACE_LINES
 
 
-def _find_body_frame_indent(lines: list[str]) -> str:
+def _detect_indent_unit(source: str) -> str:
+    """Infer the indentation unit used by the source text.
+
+    Returns a string — either a tab character or N spaces. This reads
+    the whole source and finds the smallest positive indent that appears
+    on an indented line. Fall back to 4 spaces if nothing's indented.
+
+    Used when ``_find_body_frame_indent`` can't infer from the node's
+    own body (because the body is empty or has no non-trivial lines).
+    """
+    if not source:
+        return "    "
+    smallest_spaces = 0
+    has_tab_indent = False
+    for line in source.splitlines():
+        if not line.strip():
+            continue
+        # Count leading whitespace
+        n_leading = len(line) - len(line.lstrip())
+        if n_leading == 0:
+            continue
+        lead = line[:n_leading]
+        if "\t" in lead:
+            has_tab_indent = True
+            continue
+        if smallest_spaces == 0 or n_leading < smallest_spaces:
+            smallest_spaces = n_leading
+    if has_tab_indent and smallest_spaces == 0:
+        return "\t"
+    if smallest_spaces > 0:
+        return " " * smallest_spaces
+    return "    "
+
+
+def _find_body_frame_indent(lines: list[str], full_source: str = "") -> str:
     """Find the indent of the body's top-level statements (the body frame).
 
     Scans past the signature line (first line ending with ``:`` or ``{``)
@@ -496,31 +613,36 @@ def _find_body_frame_indent(lines: list[str]) -> str:
     adding a new sibling statement inside the body (e.g., a new method
     in a class, a new statement in a function).
 
-    Falls back to ``signature_indent + 4`` if no body lines are found.
+    If the node has no usable body lines (empty function, empty class,
+    pass-only body), falls back to ``signature_indent + indent_unit``
+    where ``indent_unit`` is inferred from the surrounding file rather
+    than hardcoded to 4 spaces.
     """
     if not lines:
         return "    "
 
     signature_indent = _leading_indent(lines[0])
-    fallback = signature_indent + "    "
 
     body_start = _find_body_start(lines)
-    if body_start >= len(lines):
-        return fallback
 
     shallowest: str | None = None
-    for line in lines[body_start:]:
-        if not line.strip():
-            continue
-        # Skip closing braces — they're structural, not body content
-        if _is_closing_brace_line(line):
-            continue
-        indent = _leading_indent(line)
-        if len(indent) <= len(signature_indent):
-            continue
-        if shallowest is None or len(indent) < len(shallowest):
-            shallowest = indent
-    return shallowest if shallowest is not None else fallback
+    if body_start < len(lines):
+        for line in lines[body_start:]:
+            if not line.strip():
+                continue
+            if _is_closing_brace_line(line):
+                continue
+            indent = _leading_indent(line)
+            if len(indent) <= len(signature_indent):
+                continue
+            if shallowest is None or len(indent) < len(shallowest):
+                shallowest = indent
+    if shallowest is not None:
+        return shallowest
+
+    # No usable body content — infer the indent unit from the full source.
+    indent_unit = _detect_indent_unit(full_source) if full_source else "    "
+    return signature_indent + indent_unit
 
 
 def _find_append_insertion_index(lines: list[str]) -> int:

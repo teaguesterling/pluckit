@@ -126,15 +126,18 @@ def _build_parser() -> argparse.ArgumentParser:
         metavar=("OLD", "NEW"),
         help="Scoped replace OLD with NEW within each matched node",
     )
+    # Line-level insertions (whole new lines, indentation-matched)
     ops.add_argument(
-        "--prepend",
+        "--prepend-lines", "--prepend",
         metavar="CODE",
-        help="Insert CODE at the top of the matched node's body",
+        dest="prepend_lines",
+        help="Insert CODE as new line(s) at the top of the matched node's body",
     )
     ops.add_argument(
-        "--append",
+        "--append-lines", "--append",
         metavar="CODE",
-        help="Insert CODE at the end of the matched node's body",
+        dest="append_lines",
+        help="Insert CODE as new line(s) at the bottom of the matched node's body",
     )
     ops.add_argument(
         "--wrap",
@@ -161,6 +164,22 @@ def _build_parser() -> argparse.ArgumentParser:
         "--remove-arg",
         metavar="NAME",
         help="Remove keyword argument NAME from matched call expressions",
+    )
+    ops.add_argument(
+        "--insert-lines",
+        nargs=3,
+        metavar=("POSITION", "SELECTOR", "CODE"),
+        help=(
+            "Insert CODE relative to a descendant matching SELECTOR. "
+            "POSITION is 'before' or 'after'. SELECTOR is a CSS selector "
+            "evaluated against each matched node's subtree; the first match "
+            "is used as the anchor."
+        ),
+    )
+    ops.add_argument(
+        "--clear-body",
+        action="store_true",
+        help="Clear the body of matched functions/classes (keeps the signature)",
     )
     ops.add_argument(
         "--rename",
@@ -327,6 +346,9 @@ def _build_mutation_from_args(args: argparse.Namespace):
         AddArg,
         AddParam,
         Append,
+        ClearBody,
+        InsertAfter,
+        InsertBefore,
         Prepend,
         Remove,
         RemoveArg,
@@ -343,10 +365,10 @@ def _build_mutation_from_args(args: argparse.Namespace):
     if args.replace is not None:
         old, new = args.replace
         return ScopedReplace(old, new), "replace"
-    if args.prepend is not None:
-        return Prepend(args.prepend), "prepend"
-    if args.append is not None:
-        return Append(args.append), "append"
+    if args.prepend_lines is not None:
+        return Prepend(args.prepend_lines), "prependLines"
+    if args.append_lines is not None:
+        return Append(args.append_lines), "appendLines"
     if args.wrap is not None:
         before, after = args.wrap
         return Wrap(before, after), "wrap"
@@ -358,6 +380,17 @@ def _build_mutation_from_args(args: argparse.Namespace):
         return AddArg(args.add_arg), "addArg"
     if args.remove_arg is not None:
         return RemoveArg(args.remove_arg), "removeArg"
+    if args.insert_lines is not None:
+        position, selector, code = args.insert_lines
+        position = position.lower()
+        if position not in ("before", "after"):
+            raise SystemExit(
+                f"pluckit edit: --insert-lines POSITION must be 'before' or 'after', got {position!r}"
+            )
+        cls = InsertBefore if position == "before" else InsertAfter
+        return cls(selector, code), f"insertLines {position}"
+    if args.clear_body:
+        return ClearBody(), "clearBody"
     if args.rename is not None:
         return Rename(args.rename), "rename"
     if args.remove:

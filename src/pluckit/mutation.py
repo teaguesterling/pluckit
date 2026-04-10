@@ -101,6 +101,39 @@ class MutationEngine:
             except Exception:
                 pass
 
+    def _resolve_anchor_lines(self, node: dict, anchor_selector: str) -> tuple[int, int] | None:
+        """Find the first descendant of ``node`` matching ``anchor_selector``.
+
+        Returns (start_line, end_line) of the first match, or None if no
+        descendants match. Uses pluckit's selector compiler + a DFS range
+        check so the anchor is scoped to the parent's subtree.
+        """
+        from pluckit._sql import _selector_to_where, _esc
+
+        where = _selector_to_where(anchor_selector)
+        file_path = _esc(node["file_path"])
+        node_id = int(node["node_id"])
+
+        sql = f"""
+            WITH parent AS (
+                SELECT node_id, descendant_count
+                FROM read_ast('{file_path}')
+                WHERE node_id = {node_id}
+            )
+            SELECT c.start_line, c.end_line
+            FROM read_ast('{file_path}') c, parent p
+            WHERE c.node_id > p.node_id
+              AND c.node_id <= p.node_id + p.descendant_count
+              AND ({where})
+            ORDER BY c.node_id
+            LIMIT 1
+        """
+        try:
+            result = self._ctx.db.sql(sql).fetchone()
+        except Exception:
+            return None
+        return (int(result[0]), int(result[1])) if result else None
+
     def _splice_file(self, source: str, nodes: list[dict], mutation: Mutation) -> str:
         """Apply ``mutation`` to every node in ``nodes`` within ``source``.
 
@@ -130,7 +163,21 @@ class MutationEngine:
             if not overlaps:
                 deduped.append(node)
 
+        # Pre-resolve anchors for mutations that need them
+        needs_anchor = getattr(mutation, "needs_anchor_resolution", False)
+
         for node in deduped:
+            if needs_anchor:
+                anchor_lines = self._resolve_anchor_lines(node, getattr(mutation, "anchor", ""))
+                if anchor_lines is not None:
+                    node = {
+                        **node,
+                        "_anchor_start_line": anchor_lines[0],
+                        "_anchor_end_line": anchor_lines[1],
+                    }
+                else:
+                    node = {**node, "_anchor_start_line": None, "_anchor_end_line": None}
+
             start_idx = max(0, node["start_line"] - 1)
             end_idx = min(len(lines), node["end_line"])
             old_text = "".join(lines[start_idx:end_idx])

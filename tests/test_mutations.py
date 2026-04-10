@@ -11,6 +11,9 @@ from pluckit.mutations import (
     AddArg,
     AddParam,
     Append,
+    ClearBody,
+    InsertAfter,
+    InsertBefore,
     Prepend,
     Remove,
     RemoveArg,
@@ -306,6 +309,86 @@ class TestEndToEndRemoveArg:
         content = (mut_repo / "src" / "caller.py").read_text()
         assert "fetch(url='x')" in content
         assert "timeout=30" not in content
+
+
+class TestClearBody:
+    def test_python_function(self):
+        m = ClearBody()
+        text = "def foo(x):\n    y = x * 2\n    return y\n"
+        result = m.compute({"language": "python"}, text, "")
+        assert "def foo(x):" in result
+        assert "pass" in result
+        assert "return y" not in result
+
+    def test_cpp_function_preserves_closing_brace(self):
+        m = ClearBody()
+        text = "int get_timeout() const {\n    return timeout;\n}"
+        result = m.compute({"language": "cpp"}, text, "")
+        assert "int get_timeout() const {" in result
+        assert "}" in result
+        assert "return timeout" not in result
+
+    def test_java_method(self):
+        m = ClearBody()
+        text = "public int foo() {\n    return 1;\n}"
+        result = m.compute({"language": "java"}, text, "")
+        assert "public int foo() {" in result
+        assert "}" in result
+        assert "return 1" not in result
+
+
+class TestInsertBeforeAfter:
+    """End-to-end tests for InsertBefore/InsertAfter with real AST anchor resolution."""
+
+    def test_insert_before_method_in_class(self, mut_repo):
+        import textwrap
+        (mut_repo / "src" / "classes.py").write_text(textwrap.dedent("""\
+            class Foo:
+                def __init__(self, x):
+                    self.x = x
+
+                def bar(self):
+                    return self.x
+        """))
+        pluck = Plucker(code=str(mut_repo / "src/classes.py"))
+        pluck.find(".cls#Foo").insertBefore(".fn#bar", "def pre_bar(self):\n    pass")
+        content = (mut_repo / "src" / "classes.py").read_text()
+        # pre_bar should appear before bar
+        pre_idx = content.find("def pre_bar")
+        bar_idx = content.find("def bar")
+        assert pre_idx != -1
+        assert pre_idx < bar_idx
+
+    def test_insert_after_method_in_class(self, mut_repo):
+        import textwrap
+        (mut_repo / "src" / "classes.py").write_text(textwrap.dedent("""\
+            class Foo:
+                def bar(self):
+                    return 1
+
+                def baz(self):
+                    return 2
+        """))
+        pluck = Plucker(code=str(mut_repo / "src/classes.py"))
+        pluck.find(".cls#Foo").insertAfter(".fn#bar", "def post_bar(self):\n    pass")
+        content = (mut_repo / "src" / "classes.py").read_text()
+        bar_idx = content.find("def bar")
+        post_idx = content.find("def post_bar")
+        baz_idx = content.find("def baz")
+        assert bar_idx < post_idx < baz_idx
+
+    def test_insert_before_missing_anchor_is_noop(self, mut_repo):
+        import textwrap
+        (mut_repo / "src" / "empty.py").write_text(textwrap.dedent("""\
+            class Foo:
+                def bar(self):
+                    return 1
+        """))
+        original = (mut_repo / "src" / "empty.py").read_text()
+        pluck = Plucker(code=str(mut_repo / "src/empty.py"))
+        pluck.find(".cls#Foo").insertBefore(".fn#does_not_exist", "def extra(self): pass")
+        content = (mut_repo / "src" / "empty.py").read_text()
+        assert content == original
 
 
 class TestTransactionRollback:
