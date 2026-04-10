@@ -27,7 +27,9 @@ import random
 
 _NODE_NAME_VARIANTS: dict[str, list[str]] = {
     ".fn":      ["functions", "methods", "function definitions", "fns"],
+    ".func":    ["functions", "methods", "function definitions"],
     ".cls":     ["classes", "class definitions"],
+    ".class":   ["classes", "class definitions"],
     ".call":    ["calls", "function calls", "invocations"],
     ".ret":     ["return statements", "returns"],
     ".if":      ["if statements", "conditionals", "if blocks"],
@@ -44,6 +46,21 @@ _NODE_NAME_VARIANTS: dict[str, list[str]] = {
     ".num":     ["number literals", "numbers", "numeric literals"],
     ".block":   ["blocks", "code blocks"],
     ".comment": ["comments"],
+    ".var":     ["variables", "variable declarations"],
+    ".id":      ["identifiers"],
+    ".member":  ["member accesses", "attribute accesses"],
+    # Tree-sitter exact types that sometimes appear
+    "return_statement":   ["return statements"],
+    "function_definition": ["function definitions"],
+    "class_definition":    ["class definitions"],
+    "try_statement":       ["try blocks"],
+    "except_clause":       ["except handlers"],
+    "if_statement":        ["if statements"],
+    "for_statement":       ["for loops"],
+    "while_statement":     ["while loops"],
+    "import_statement":    ["imports"],
+    "assignment":          ["assignments"],
+    "identifier":          ["identifiers"],
 }
 
 # Deterministic fallback (first variant)
@@ -51,15 +68,35 @@ _NODE_NAMES: dict[str, str] = {k: v[0] for k, v in _NODE_NAME_VARIANTS.items()}
 
 # Pseudo-selector → adjective / qualifier (with synonym lists)
 _PSEUDO_ADJECTIVE_VARIANTS: dict[str, list[str]] = {
-    ":exported":      ["public", "exported", "non-private", "externally visible"],
-    ":private":       ["private", "internal", "underscore-prefixed", "non-public"],
-    ":async":         ["async", "asynchronous"],
-    ":decorated":     ["decorated", "annotated", "with decorators"],
-    ":first-child":   ["first", "initial", "opening"],
-    ":first":         ["first", "initial"],
-    ":last-child":    ["last", "final", "closing"],
-    ":last":          ["last", "final"],
-    ":has-docstring": ["documented", "docstring-bearing", "with docstrings"],
+    ":exported":       ["public", "exported", "non-private", "externally visible"],
+    ":private":        ["private", "internal", "underscore-prefixed", "non-public"],
+    ":async":          ["async", "asynchronous"],
+    ":decorated":      ["decorated", "annotated", "with decorators"],
+    ":first-child":    ["first", "initial", "opening"],
+    ":first":          ["first", "initial"],
+    ":last-child":     ["last", "final", "closing"],
+    ":last":           ["last", "final"],
+    ":has-docstring":  ["documented", "docstring-bearing", "with docstrings"],
+    # New pseudo-classes
+    ":named":          ["named", "with names"],
+    ":unreferenced":   ["unreferenced", "unused", "dead", "never-called"],
+    ":is-called":      ["called", "used", "referenced"],
+    ":is-referenced":  ["referenced", "used"],
+    ":typed":          ["typed", "type-annotated"],
+    ":void":           ["void", "without return type"],
+    ":variadic":       ["variadic", "with variable arguments"],
+    ":static":         ["static"],
+    ":const":          ["const", "final", "immutable"],
+    ":public":         ["public"],
+    ":protected":      ["protected"],
+    ":definition":     ["definition", "defined"],
+    ":reference":      ["referencing", "reference"],
+    ":declaration":    ["forward-declared", "declared"],
+    ":abstract":       ["abstract"],
+    ":scope":          ["scope-creating", "scoped"],
+    ":empty":          ["empty"],
+    ":root":           ["top-level", "root"],
+    ":syntax":         ["syntax-only", "keyword"],
 }
 
 _PSEUDO_ADJECTIVES: dict[str, str] = {k: v[0] for k, v in _PSEUDO_ADJECTIVE_VARIANTS.items()}
@@ -105,6 +142,91 @@ def describe_selector(selector: str, rng: random.Random | None = None) -> str:
         variants = _PSEUDO_ADJECTIVE_VARIANTS.get(pseudo, [pseudo.lstrip(":")])
         return _pick(variants)
 
+    # Reject filter predicates (e.g. "fn: fn.params().count() > 5")
+    # These are not selectors — they're lambda-like predicates that leak in
+    # from .filter() arguments via faulty context extraction.
+    if re.match(r'^\w+:\s*\w+\.', s):
+        return "the selection"
+
+    # Reject anything that looks like code rather than a selector
+    if s.startswith("(") or "=>" in s or " == " in s or " > " in s[:50] and "(" in s:
+        # Heuristic: if it has comparison operators and method calls, it's a predicate
+        if re.search(r'\.\w+\(\).*[<>=]', s):
+            return "the selection"
+
+    # Handle pseudo-classes with arguments using paren-aware parsing
+    # :matches("..."), :calls(name), :called-by(name), :scope(type)
+    for pseudo_name in (":matches", ":calls", ":called-by", ":scope"):
+        idx = s.find(pseudo_name + "(")
+        if idx == -1:
+            continue
+        # Find matching close paren
+        start = idx + len(pseudo_name) + 1
+        depth = 1
+        i = start
+        while i < len(s) and depth > 0:
+            if s[i] == '(':
+                depth += 1
+            elif s[i] == ')':
+                depth -= 1
+                if depth == 0:
+                    break
+            i += 1
+        if depth != 0:
+            continue
+        arg = s[start:i]
+        outer_part = s[:idx]
+        rest_part = s[i + 1:]
+        outer_desc = describe_selector(outer_part, rng) if outer_part else "the selection"
+
+        if pseudo_name == ":matches":
+            pattern = arg.strip('"\'')
+            base = f"{outer_desc} {_pick(['containing', 'matching', 'with the pattern'])} `{pattern}`"
+        elif pseudo_name == ":calls":
+            patterns = [
+                f"{outer_desc} that call {arg}",
+                f"{outer_desc} calling {arg}",
+                f"callers of {arg}",
+            ]
+            base = _pick(patterns)
+        elif pseudo_name == ":called-by":
+            base = f"{outer_desc} inside {arg}"
+        elif pseudo_name == ":scope":
+            base = f"{outer_desc} within their enclosing {arg}"
+        else:
+            base = outer_desc
+
+        # Recursively describe any remaining pseudo-classes/attributes
+        if rest_part:
+            # Chain another describe_selector call with the rest appended to
+            # a dummy type so we get a valid parse
+            rest_desc = describe_selector(".node" + rest_part, rng)
+            # Strip leading dummy word
+            for prefix in ("nodes", "node", "all nodes", "every node"):
+                if rest_desc.startswith(prefix):
+                    rest_desc = rest_desc[len(prefix):].strip()
+                    break
+            if rest_desc:
+                return f"{base} that are {rest_desc}"
+        return base
+
+    # Handle ::pseudo-element (navigation)
+    pe_match = re.match(r'^(.+?)::(callers|callees|parent|scope|parent-definition|next-sibling|prev-sibling)$', s)
+    if pe_match:
+        target = pe_match.group(1)
+        pe = pe_match.group(2)
+        target_desc = describe_selector(target, rng)
+        pe_descriptions = {
+            "callers": f"functions that call {target_desc}",
+            "callees": f"what {target_desc} calls",
+            "parent": f"the parent of {target_desc}",
+            "scope": f"the enclosing scope of {target_desc}",
+            "parent-definition": f"the function containing {target_desc}",
+            "next-sibling": f"the node after {target_desc}",
+            "prev-sibling": f"the node before {target_desc}",
+        }
+        return pe_descriptions.get(pe, target_desc)
+
     # Handle :has(...) composed selector  → "X containing Y"
     has_match = re.match(r'^([^\s:]+):has\((.+)\)$', s)
     if has_match:
@@ -137,9 +259,19 @@ def describe_selector(selector: str, rng: random.Random | None = None) -> str:
         connectors = ["directly inside", "directly under", "as children of"]
         return f"{inner} {_pick(connectors)} {outer}"
 
-    # Extract node type (leading .word)
-    node_match = re.match(r'^(\.[a-z]+)', s)
-    node_type = node_match.group(1) if node_match else ""
+    # Extract node type — either .word (alias) or bare word (tree-sitter type)
+    node_match = re.match(r'^(\.[a-z][\w-]*)', s)
+    if node_match:
+        node_type = node_match.group(1)
+    else:
+        # Try bare tree-sitter type (word_underscore_form)
+        node_match = re.match(r'^([a-z][\w]*)', s)
+        node_type = node_match.group(1) if node_match else ""
+
+    if not node_type:
+        # Couldn't parse — bail out to a safe default
+        return "the selection"
+
     node_name = _node_name(node_type)
 
     remainder = s[len(node_type):]
@@ -660,6 +792,95 @@ def _strip_quotes(s: str) -> str:
     return s
 
 
+def _humanize_predicate(predicate: str) -> str:
+    """Turn a filter predicate like 'fn.params().count() > 5' into natural English."""
+    p = predicate.strip()
+
+    # Parameter count
+    m = re.match(r'\w+\.params\(\)\.count\(\)\s*([<>=!]+)\s*(\d+)', p)
+    if m:
+        op, n = m.group(1), m.group(2)
+        if op == '>':
+            return f"more than {n} parameters"
+        if op == '>=':
+            return f"{n} or more parameters"
+        if op == '<':
+            return f"fewer than {n} parameters"
+        if op == '==':
+            return f"exactly {n} parameters"
+
+    # Complexity
+    m = re.match(r'\w+\.complexity\(\)\s*([<>=!]+)\s*(\d+)', p)
+    if m:
+        op, n = m.group(1), m.group(2)
+        if op == '>':
+            return f"complexity greater than {n}"
+        if op == '<':
+            return f"low complexity (under {n})"
+
+    # Coverage
+    m = re.match(r'\w+\.coverage\(\)\s*([<>=!]+)\s*([\d.]+)', p)
+    if m:
+        op, n = m.group(1), m.group(2)
+        if op == '<':
+            return f"coverage below {float(n)*100:.0f}%"
+        if op == '>':
+            return f"coverage above {float(n)*100:.0f}%"
+
+    # Callers count
+    m = re.match(r'\w+\.callers\(\)\.count\(\)\s*([<>=!]+)\s*(\d+)', p)
+    if m:
+        op, n = m.group(1), m.group(2)
+        if op == '==' and n == '0':
+            return "no callers"
+        if op == '>':
+            return f"more than {n} callers"
+
+    # Failures
+    m = re.match(r'\w+\.failures\(\)\.count\(\)\s*([<>=!]+)\s*(\d+)', p)
+    if m:
+        op, n = m.group(1), m.group(2)
+        if op == '>' and n == '0':
+            return "a history of failures"
+
+    # Lines
+    m = re.match(r'\w+\.lines\(\)\s*([<>=!]+)\s*(\d+)', p)
+    if m:
+        op, n = m.group(1), m.group(2)
+        if op == '>':
+            return f"more than {n} lines"
+        if op == '<':
+            return f"fewer than {n} lines"
+
+    # History with time windows
+    if 'history(' in p:
+        if 'last_week' in p and '> 0' in p:
+            return "changes in the last week"
+        if 'last_month' in p:
+            m = re.search(r'>\s*(\d+)', p)
+            if m:
+                return f"more than {m.group(1)} changes this month"
+            return "recent changes this month"
+        if 'last_' in p:
+            return "recent changes"
+
+    # Dependents count
+    m = re.match(r'\w+\.dependents\(\)\.count\(\)\s*([<>=!]+)\s*(\d+)', p)
+    if m:
+        op, n = m.group(1), m.group(2)
+        if op == '>':
+            return f"more than {n} dependents"
+        if op == '==':
+            return f"exactly {n} dependents"
+
+    # Clean up any remaining raw predicate — strip the parameter prefix
+    p_clean = re.sub(r'^\w+:\s*', '', p)
+    # If it still looks like raw code (has . and () ) just return a generic phrase
+    if re.search(r'\.\w+\(\)', p_clean):
+        return "a specific condition"
+    return p_clean
+
+
 def _extract_chain_context(chain: str, rng: random.Random | None = None) -> dict[str, str]:
     """Parse chain string with regex to extract template variables."""
     ctx: dict[str, str] = {}
@@ -725,9 +946,26 @@ def _extract_chain_context(chain: str, rng: random.Random | None = None) -> dict
             break
 
     # predicate_desc: from filter(fn: ...)
-    pred_match = re.search(r'\bfilter\s*\(\s*\w+\s*:\s*(.+?)\s*\)', chain)
-    if pred_match:
-        ctx["predicate_desc"] = pred_match.group(1)
+    # Need to handle nested parens properly — capture everything until the
+    # matching close paren, not the lazy first one.
+    pred_start = re.search(r'\bfilter\s*\(\s*\w+\s*:\s*', chain)
+    if pred_start:
+        depth = 1
+        i = pred_start.end()
+        start = i
+        while i < len(chain) and depth > 0:
+            if chain[i] == '(':
+                depth += 1
+            elif chain[i] == ')':
+                depth -= 1
+                if depth == 0:
+                    break
+            i += 1
+        if depth == 0:
+            predicate = chain[start:i].strip()
+            # Humanize the predicate: turn "fn.params().count() > 5" into
+            # "has more than 5 parameters"
+            ctx["predicate_desc"] = _humanize_predicate(predicate)
 
     # addArg
     arg_match = re.search(r'\baddArg\s*\(\s*([\'"])(.*?)\1', chain)

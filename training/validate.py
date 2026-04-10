@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -19,6 +20,38 @@ from typing import Any
 
 from training.chain_parser import parse_chain
 from training.spec import Spec, load_spec
+
+
+# Markers of garbled intents — selector syntax or predicate debris
+# leaking into what should be natural language
+_GARBLED_MARKERS = (
+    "fn.params(", "fn.callers(", "fn.complexity(", "fn.coverage(",
+    "fn.history(", "fn.failures(", "fn.lines(", "fn.dependents(",
+    "sNone", "sreturn_", "smatches(", "shas(", 's___"', ' s"', ' s)',
+    "that are )", "where fn.", "with fn.",
+)
+
+
+def _is_garbled_intent(intent: str) -> bool:
+    """Detect intents that contain selector/predicate debris.
+
+    These indicate failures in describe_selector or predicate extraction,
+    and produce training data that teaches the model wrong patterns.
+    """
+    if not intent:
+        return True
+    # Unbalanced quotes or parens
+    if intent.count('"') % 2 != 0:
+        return True
+    if intent.count('(') != intent.count(')'):
+        return True
+    # Selector pseudo-class syntax in natural language
+    if re.search(r':(has|not|matches|calls|scope|called-by)\(', intent):
+        return True
+    # Known debris markers
+    if any(marker in intent for marker in _GARBLED_MARKERS):
+        return True
+    return False
 
 
 # ---------------------------------------------------------------------------
@@ -191,6 +224,23 @@ _CLASS_OPS = {"addMethod", "addProperty", "addBase"}
 # Operations that only make sense on call-like targets
 _CALL_OPS = {"addArg", "removeArg", "replaceArg"}
 
+# Node types that don't have an identifier name — #name is nonsensical on them
+_UNNAMED_NODE_TYPES = {
+    ".while", ".for", ".try", ".except", ".catch", ".if", ".cond",
+    ".block", ".body", ".with", ".ret", ".return", ".throw", ".raise",
+    ".finally", ".str", ".string", ".num", ".number", ".bool", ".boolean",
+    ".comment", ".stmt", ".statement", ".expr",
+}
+
+# Node types that ARE functions (can have ::callers, ::callees, :calls())
+_FUNCTION_NODE_TYPES = {
+    ".fn", ".func", ".function", ".method", ".def-func",
+    "function_definition", "method_definition", "function_declaration",
+}
+
+# Node types that are call expressions (can have :called-by)
+_CALL_NODE_TYPES = {".call", ".invoke", ".access-call", "call_expression", "call"}
+
 
 def _extract_selector_node_type(args: list[str]) -> str | None:
     """Extract the primary node type from a selector argument."""
@@ -198,9 +248,55 @@ def _extract_selector_node_type(args: list[str]) -> str | None:
         return None
     sel = args[0].strip("'\"")
     # Match leading .word or word (bare type)
-    import re
-    m = re.match(r'(\.\w+)', sel)
+    m = re.match(r'(\.[\w-]+)', sel)
     return m.group(1) if m else None
+
+
+def _check_selector_plausibility(selector: str) -> str | None:
+    """Check a raw selector string for semantic nonsense.
+
+    Returns an error message if implausible, None if OK.
+    """
+    # Extract the primary node type
+    m = re.match(r'^(\.[\w-]+|[a-z_]+)', selector.strip())
+    if not m:
+        return None
+    node_type = m.group(1)
+
+    # #name on unnamed node types
+    if "#" in selector:
+        name_part = selector[len(node_type):]
+        if name_part.startswith("#"):
+            if node_type in _UNNAMED_NODE_TYPES:
+                return f"#name on {node_type} (this node type doesn't have a name)"
+
+    # ::callers / ::callees on non-function types
+    if "::callers" in selector or "::callees" in selector:
+        if node_type not in _FUNCTION_NODE_TYPES:
+            # Allow if it's a pseudo-element on .call (calls have their own callers)
+            if node_type not in _CALL_NODE_TYPES:
+                return f"::callers/::callees on {node_type} (only applies to functions)"
+
+    # :calls(name) on non-function types
+    calls_match = re.search(r':calls\(', selector)
+    if calls_match and node_type not in _FUNCTION_NODE_TYPES and node_type not in {".class", ".cls", "class_definition"}:
+        return f":calls() on {node_type} (only applies to functions and classes)"
+
+    # :called-by(name) on non-call types
+    if ":called-by(" in selector and node_type not in _CALL_NODE_TYPES:
+        return f":called-by() on {node_type} (only applies to calls)"
+
+    # :is-called / :is-referenced only on definitions
+    if ":is-called" in selector:
+        if node_type not in _FUNCTION_NODE_TYPES:
+            return f":is-called on {node_type} (only applies to functions)"
+
+    # :async/:static/:void/:variadic only make sense on functions
+    for modifier in (":async", ":void", ":variadic", ":typed"):
+        if modifier in selector and node_type not in _FUNCTION_NODE_TYPES:
+            return f"{modifier} on {node_type} (only applies to functions)"
+
+    return None
 
 
 def _check_plausibility(ops: list) -> str | None:
@@ -208,6 +304,17 @@ def _check_plausibility(ops: list) -> str | None:
 
     Returns an error message string if implausible, None if OK.
     """
+    # Check each selector string for internal plausibility issues
+    for op in ops:
+        if op.name in ("select", "find", "source", "not_", "parent", "children",
+                        "siblings", "ancestor", "containing"):
+            for arg in op.args:
+                sel = arg.strip("'\"")
+                if sel.startswith(".") or (sel and sel[0].isalpha() and "_" in sel[:30]):
+                    err = _check_selector_plausibility(sel)
+                    if err:
+                        return err
+
     # Get the initial selector's node type
     entry_node_type = _extract_selector_node_type(ops[0].args) if ops else None
 
@@ -319,6 +426,16 @@ def main(argv: list[str] | None = None) -> None:
 
             intent = pair.get("intent", "")
             chain = pair.get("chain", "")
+
+            # Reject garbled intents (selector debris leaking into natural language)
+            if _is_garbled_intent(intent):
+                rejected_count += 1
+                if reject_fh:
+                    record = dict(pair)
+                    record["valid"] = False
+                    record["error"] = "Garbled intent (selector syntax leaked)"
+                    reject_fh.write(json.dumps(record) + "\n")
+                continue
 
             # Dedup by intent
             if args.dedup_intents:

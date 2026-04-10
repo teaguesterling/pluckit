@@ -185,3 +185,79 @@ class TestPlausibility:
     def test_wrap_on_call_accepted(self, spec):
         result = validate_chain("select('.call#query').wrap('try:', 'except: pass')", spec)
         assert result.valid
+
+
+class TestGarbledIntentDetection:
+    def test_clean_intent_accepted(self):
+        from training.validate import _is_garbled_intent
+        assert not _is_garbled_intent("find all public functions")
+        assert not _is_garbled_intent("who calls validate_token")
+        assert not _is_garbled_intent("add timeout parameter to all exported functions")
+
+    def test_unbalanced_quotes_rejected(self):
+        from training.validate import _is_garbled_intent
+        assert _is_garbled_intent('select with "unbalanced')
+
+    def test_unbalanced_parens_rejected(self):
+        from training.validate import _is_garbled_intent
+        assert _is_garbled_intent("select with (open only")
+        assert _is_garbled_intent("methods matching `await` that are )")
+
+    def test_selector_syntax_in_intent_rejected(self):
+        from training.validate import _is_garbled_intent
+        assert _is_garbled_intent("find functions :matches(\"return None\")")
+        assert _is_garbled_intent("select .func:has(print)")
+
+    def test_predicate_debris_rejected(self):
+        from training.validate import _is_garbled_intent
+        assert _is_garbled_intent("which methods have fn.params(")
+        assert _is_garbled_intent("count where fn.callers().count() == 0")
+
+    def test_s_prefix_debris_rejected(self):
+        from training.validate import _is_garbled_intent
+        assert _is_garbled_intent("show me sreturn_statement within their enclosing function")
+        assert _is_garbled_intent('give me sNone") under funcs that are matches')
+
+    def test_empty_intent_rejected(self):
+        from training.validate import _is_garbled_intent
+        assert _is_garbled_intent("")
+
+
+class TestSelectorPlausibility:
+    def test_name_on_while_rejected(self, spec):
+        result = validate_chain("select('.while#foo').count()", spec)
+        assert not result.valid
+        assert "#name" in result.error or "implausible" in result.error.lower()
+
+    def test_name_on_try_rejected(self, spec):
+        result = validate_chain("select('.try#foo').count()", spec)
+        assert not result.valid
+
+    def test_name_on_comment_rejected(self, spec):
+        result = validate_chain("select('.comment#foo').count()", spec)
+        assert not result.valid
+
+    def test_callers_on_while_rejected(self, spec):
+        result = validate_chain("select('.while#foo::callers').names()", spec)
+        assert not result.valid
+
+    def test_callers_on_func_accepted(self, spec):
+        result = validate_chain("select('.fn#validate::callers').names()", spec)
+        assert result.valid
+
+    def test_calls_on_function_accepted(self, spec):
+        result = validate_chain("select('.func:calls(execute)').names()", spec)
+        assert result.valid
+
+    def test_calls_on_comment_rejected(self, spec):
+        result = validate_chain("select('.comment:calls(execute)').names()", spec)
+        assert not result.valid
+
+    def test_async_on_class_rejected(self, spec):
+        # .async on a class doesn't make sense
+        result = validate_chain("select('.cls:async').names()", spec)
+        assert not result.valid
+
+    def test_async_on_function_accepted(self, spec):
+        result = validate_chain("select('.func:async').names()", spec)
+        assert result.valid
