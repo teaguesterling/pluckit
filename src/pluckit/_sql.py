@@ -44,6 +44,13 @@ _TAXONOMY_TO_SEMANTIC: dict[str, int] = {
     "statement-assign": 204,  # OPERATOR_ASSIGNMENT
     # Execution
     "execution": 128,  # EXECUTION_STATEMENT
+    # Access (COMPUTATION_*)
+    "access-call": 208,    # COMPUTATION_CALL
+    "access-member": 212,  # COMPUTATION_ACCESS (attribute / field access)
+    "access-index": 212,   # COMPUTATION_ACCESS (subscript) — shares code with member
+    # Identifier sub-kinds — not given distinct codes yet, fall through to name-id
+    "name-self": 80,
+    "name-super": 80,
 }
 
 # Selector token pattern: .class-name  optionally followed by #id
@@ -129,6 +136,13 @@ def _selector_to_where(selector: str) -> str:
         conditions.append(f"semantic_type = {sem_code}")
         # Exclude syntax-only tokens (keyword tokens like `def`, `class`)
         conditions.append("(flags & 1) = 0")
+    elif cls.startswith(("def-", "access-", "flow-", "error-", "literal-",
+                          "name-", "block-", "metadata-", "external-",
+                          "statement-", "operator-")):
+        # Resolved alias with no mapped semantic code — fail closed rather
+        # than silently matching everything. This guards against the
+        # selector compiler quietly drifting as sitting_duck's taxonomy grows.
+        return "1=0"
 
     if id_name:
         conditions.append(f"name = '{_esc(id_name)}'")
