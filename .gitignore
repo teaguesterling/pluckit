@@ -5,16 +5,9 @@ dist/
 build/
 .eggs/
 
-# Generated training data (regenerate with run_pipeline.sh)
-training/raw_pairs.jsonl
-training/valid_pairs.jsonl
-training/rejected.jsonl
-training/training.jsonl
-training/training_chat.jsonl
-training/training_completion.jsonl
-training/train.jsonl
-training/val.jsonl
-training/system_prompt.txt
+# Training data is tracked via git lfs (see .gitattributes)
+# Regenerate with: bash training/run_pipeline.sh generate
+# These are intentionally committed so consumers can train without regenerating.
 
 # Model artifacts
 pluckit-lora/
