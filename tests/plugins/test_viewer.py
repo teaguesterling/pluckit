@@ -251,11 +251,24 @@ class TestSignatureTable:
         # Sample has top_level_fn and main at module level
         output = pluck.view(".fn { show: signature; }")
         # Should be a markdown table
-        assert "| File | Line | Signature |" in output
+        assert "| File | Lines | Signature |" in output
         assert "|---|---|---|" in output
         # Both functions should appear as rows
         assert "top_level_fn" in output
         assert "main" in output
+
+    def test_signature_table_has_line_range(self, pluck):
+        """Each row should show start-end range when the node spans multiple lines."""
+        output = pluck.view(".fn { show: signature; }")
+        # top_level_fn is 3 lines (def + docstring + return)
+        # It should appear as something like "1-3" or similar range
+        import re
+        # Find the row for top_level_fn and check it has a range
+        rows = [line for line in output.split("\n") if "top_level_fn" in line]
+        assert rows, "top_level_fn row not found"
+        # At least one row should contain a range like N-M
+        assert any(re.search(r"\| \d+-\d+ \|", r) for r in rows), \
+            f"Expected line range in table rows: {rows}"
 
     def test_single_match_signature_stays_code_block(self, pluck):
         output = pluck.view(".fn#top_level_fn { show: signature; }")

@@ -570,9 +570,9 @@ class AstViewer(Plugin):
     def _render_signature_table(self, plucker: Plucker, nodes: list[dict]) -> str:
         """Render a list of matched nodes as a markdown table of signatures.
 
-        Columns: File, Line, Signature. Signature text is synthesized from
-        native extraction when available, with a text-extraction fallback.
-        Pipes and newlines in signatures are escaped for table safety.
+        Columns: File, Lines, Signature. The Lines column shows the full
+        line range of the node (start-end), so agents can jump back into
+        the file with a precise range if they need the body.
         """
         rows: list[tuple[str, str, str]] = []
         for node in nodes:
@@ -590,9 +590,12 @@ class AstViewer(Plugin):
                 continue
 
             rel_path = self._relpath(plucker, file_path)
+            line_range = (
+                f"{start_line}-{end_line}" if end_line != start_line else str(start_line)
+            )
             rows.append((
                 _escape_table_cell(rel_path),
-                str(start_line),
+                line_range,
                 _escape_table_cell(sig),
             ))
 
@@ -600,11 +603,11 @@ class AstViewer(Plugin):
             return ""
 
         # Build markdown table
-        header = "| File | Line | Signature |"
+        header = "| File | Lines | Signature |"
         sep = "|---|---|---|"
         body = "\n".join(
-            f"| {file} | {line} | `{sig}` |"
-            for file, line, sig in rows
+            f"| {file} | {lines} | `{sig}` |"
+            for file, lines, sig in rows
         )
         return f"{header}\n{sep}\n{body}"
 
