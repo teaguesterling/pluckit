@@ -1,0 +1,251 @@
+# Python API
+
+pluckit's Python API is built around three types: `Plucker` (the entry
+point), `Selection` (a lazy query chain), and `Plugin` (the extension
+point). Everything else is either a mutation class or a convenience
+wrapper around these.
+
+```python
+from pluckit import Plucker, AstViewer
+
+pluck = Plucker(code="src/**/*.py", plugins=[AstViewer])
+```
+
+---
+
+## `Plucker`
+
+The entry point. Wraps a DuckDB connection, loads the `sitting_duck`
+extension on first use, and exposes methods for finding, viewing, and
+mutating code.
+
+### Constructor
+
+```python
+Plucker(
+    code: str | list[str] | None = None,
+    *,
+    plugins: list[Plugin | type[Plugin]] = (),
+    repo: str | None = None,
+    db: duckdb.DuckDBPyConnection | None = None,
+)
+```
+
+| Parameter | Description                                                              |
+|-----------|--------------------------------------------------------------------------|
+| `code`    | Glob pattern(s) or explicit file list for the source corpus              |
+| `plugins` | Plugin classes or instances to register                                  |
+| `repo`    | Repository root for relative paths (default: current working directory)  |
+| `db`      | An existing DuckDB connection to reuse (default: create a fresh one)     |
+
+### Methods
+
+#### `find(selector: str) -> Selection`
+
+Run a selector against the configured code corpus and return a lazy
+`Selection`:
+
+```python
+fns = pluck.find(".fn:exported")
+```
+
+#### `view(selector: str, *, format: str = "markdown") -> str`
+
+Render matched nodes as markdown (the `AstViewer` plugin must be
+registered):
+
+```python
+print(pluck.view(".fn#main { show: signature; }"))
+```
+
+#### `source(glob: str) -> Source`
+
+Create a `Source` handle for ad-hoc queries against a different glob
+without creating a whole new Plucker.
+
+---
+
+## `Selection`
+
+A lazy DuckDB relation. Every method on `Selection` returns another
+`Selection` — nothing materializes until you call a terminal method.
+
+### Query composition
+
+```python
+# Refine a selection
+tests = pluck.find(".fn[name^=test_]")
+without_try = tests.filter(".fn:not(:has(.try))")
+
+# Navigate
+classes = pluck.find(".cls")
+methods = classes.descendants(".fn")
+```
+
+| Method                           | Description                                  |
+|----------------------------------|----------------------------------------------|
+| `find(sel)`                      | Refine the selection with another selector   |
+| `filter(sel)`                    | Alias for `find`; semantic clarity           |
+| `descendants(sel)`               | Matches anywhere under the selection         |
+| `children(sel)`                  | Direct children only                         |
+| `ancestors(sel)`                 | Walk up the AST                              |
+| `siblings(sel)`                  | Nodes sharing a parent                       |
+| `first()`, `last()`, `nth(n)`    | Positional selection                         |
+| `limit(n)`, `offset(n)`          | Slice the result set                         |
+
+### Terminal methods
+
+These materialize the relation and return Python data:
+
+| Method                | Returns          | Description                             |
+|-----------------------|------------------|-----------------------------------------|
+| `count()`             | `int`            | Number of matched nodes                 |
+| `names()`             | `list[str]`      | Identifier names (deduplicated)         |
+| `files()`             | `list[str]`      | Distinct source files containing matches|
+| `rows()`              | `list[Node]`     | Full AST rows with all sitting_duck cols|
+| `read()`              | `list[str]`      | Raw source text of each matched node    |
+| `to_df()`             | `pd.DataFrame`   | Pandas DataFrame (requires pandas)      |
+
+### Mutation methods
+
+Every mutation method returns a refreshed `Selection` (so you can chain
+further queries, though most callers don't). All mutations are
+transactional at the invocation level — the enclosing call is atomic,
+and multiple fluent mutations are independent transactions.
+
+| Method                                   | Description                                      |
+|------------------------------------------|--------------------------------------------------|
+| `replaceWith(text)`                      | Replace entire matched node                      |
+| `replaceWith(old, new)`                  | String-level replace within matched node         |
+| `prepend(text)`                          | Prepend lines to the matched body                |
+| `append(text)`                           | Append lines to the matched body                 |
+| `insertBefore(anchor, text)`             | Insert lines before an anchor selector           |
+| `insertAfter(anchor, text)`              | Insert lines after an anchor selector            |
+| `wrap(before, after)`                    | Wrap with surrounding text                       |
+| `unwrap()`                               | Inverse of wrap                                  |
+| `addParam(param)`                        | Add a parameter to every matched function        |
+| `removeParam(name)`                      | Remove a parameter by name                       |
+| `addArg(expr)`                           | Add an argument to every matched call            |
+| `removeArg(name)`                        | Remove a keyword argument by name                |
+| `rename(new_name)`                       | Rename the first name occurrence                 |
+| `clearBody()`                            | Replace body with `pass` / `{}`                  |
+| `remove()`                               | Delete the matched node                          |
+
+Example:
+
+```python
+pluck.find(".fn#validate_token").replaceWith(
+    "return None",
+    "raise ValueError('token required')",
+)
+pluck.find(".fn:exported").addParam("timeout: int = 30")
+```
+
+### Reading matched source
+
+```python
+for node in pluck.find(".fn#validate").rows():
+    print(f"{node.file_path}:{node.start_line}")
+    print(node.source_text)
+```
+
+`Selection.rows()` returns `Node` dataclasses with all of sitting_duck's
+columns — `node_id`, `type`, `semantic_type`, `name`, `start_line`,
+`end_line`, `parent_id`, `flags`, and the native extraction columns
+(`signature_type`, `parameters`, `modifiers`, `annotations`).
+
+---
+
+## Module-level shortcuts
+
+For one-shot queries you don't need a persistent Plucker for:
+
+```python
+from pluckit import view, find
+
+print(view(".fn#main { show: outline; }", code="src/**/*.py"))
+
+for path, line, name in find(".fn:exported", code="src/**/*.py"):
+    print(f"{path}:{line}:{name}")
+```
+
+These create an ephemeral Plucker, run the query, and tear it down.
+
+---
+
+## Plugins
+
+pluckit is composable. Core capabilities live on `Selection`; anything
+that depends on extra infrastructure moves into a plugin.
+
+```python
+from pluckit import Plucker, AstViewer
+
+pluck = Plucker(
+    code="src/**/*.py",
+    plugins=[
+        AstViewer,   # viewer with { show: ... } declarations
+        # Calls,     # call graph (v0.2)
+        # History,   # git history via duck_tails (v0.2)
+        # Scope,     # read/write scope analysis (v0.2)
+    ],
+)
+```
+
+### Writing a plugin
+
+A plugin is a subclass of `pluckit.plugins.Plugin`:
+
+```python
+from pluckit.plugins import Plugin
+
+class WordCount(Plugin):
+    name = "wordcount"
+
+    methods = {
+        "word_count": lambda self: sum(
+            len(text.split()) for text in self.read()
+        ),
+    }
+
+    pseudo_classes = {
+        ":long": "end_line - start_line > 50",
+    }
+```
+
+| Class attribute   | Purpose                                                        |
+|-------------------|----------------------------------------------------------------|
+| `name`            | Unique plugin identifier                                       |
+| `methods`         | Dict of method name → function to install on `Selection`       |
+| `pseudo_classes`  | Dict of `:name` → SQL WHERE fragment                           |
+| `upgrades`        | Dict of method name → function to override an existing method  |
+| `setup(ctx)`      | Optional hook called when the plugin is registered             |
+
+Plugins can also register new semantic-type aliases by updating
+`pluckit.selectors.ALIASES`, but that's considered advanced — most
+plugins only need `methods` and `pseudo_classes`.
+
+---
+
+## Error handling
+
+Every recoverable error raises `PluckerError`:
+
+```python
+from pluckit import Plucker, PluckerError
+
+try:
+    pluck = Plucker(code="src/**/*.py")
+    pluck.find(".fn").replaceWith("def broken(:::")
+except PluckerError as e:
+    print(f"Mutation failed: {e}")
+    # All affected files have already been rolled back to their
+    # pre-mutation state.
+```
+
+`PluckerError` is raised for:
+
+- Failed extension installation (`pluckit init` will reproduce this)
+- Selector compilation errors
+- Mutation syntax errors (with automatic rollback)
+- Invalid paths, missing files, parse failures
