@@ -54,6 +54,41 @@ class Plucker:
         from pluckit.source import Source
         return Source(path, self._ctx, self._registry)
 
+    def view(self, query: str, *, format: str = "markdown") -> str:
+        """Render matched code regions from a viewer query.
+
+        Requires the AstViewer plugin to be registered. Convenience wrapper
+        that delegates to the plugin if present.
+        """
+        if "view" not in self._registry.methods:
+            raise PluckerError(
+                "view() requires the AstViewer plugin. "
+                "Use: Plucker(code=..., plugins=[AstViewer])"
+            )
+        plugin, method_name = self._registry.methods["view"]
+        method = getattr(plugin, method_name)
+        return method(self, query, format=format)
+
+    def __getattr__(self, name: str):
+        """Delegate unknown attributes to registered plugins."""
+        # __getattr__ is only called when normal attribute lookup fails,
+        # so self._registry should always exist by this point.
+        registry = self.__dict__.get("_registry")
+        if registry is not None and name in registry.methods:
+            plugin, method_name = registry.methods[name]
+            method = getattr(plugin, method_name)
+            return lambda *args, **kwargs: method(self, *args, **kwargs)
+
+        if registry is not None:
+            provider = registry.method_provider(name)
+            if provider:
+                raise PluckerError(
+                    f"{name}() requires the {provider} plugin. "
+                    f"Use: Plucker(code=..., plugins=[{provider}])"
+                )
+
+        raise AttributeError(f"Plucker has no method {name!r}")
+
     def _resolve_source(self, source: str, selector: str):
         """Resolve source string to a DuckDB relation.
 

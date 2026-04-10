@@ -1,3 +1,4 @@
 from pluckit.plugins.base import Plugin, PluginRegistry
+from pluckit.plugins.viewer import AstViewer, Rule, parse_viewer_query
 
-__all__ = ["Plugin", "PluginRegistry"]
+__all__ = ["Plugin", "PluginRegistry", "AstViewer", "Rule", "parse_viewer_query"]

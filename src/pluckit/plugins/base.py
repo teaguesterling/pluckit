@@ -11,6 +11,7 @@ _KNOWN_PROVIDERS: dict[str, str] = {
     "when": "History", "co_changes": "History",
     "interface": "Scope", "refs": "Scope", "defs": "Scope",
     "shadows": "Scope", "unused_params": "Scope",
+    "view": "AstViewer",
 }
 
 
