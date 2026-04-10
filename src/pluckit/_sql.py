@@ -51,6 +51,44 @@ _SELECTOR_RE = re.compile(
     r"^\.(?P<cls>[a-zA-Z_-]+)(?:#(?P<id>[^\s\[:\#]+))?(?P<rest>.*)$"
 )
 
+# Attribute selector pattern: [name op "value"] or [name op value]
+_ATTR_RE = re.compile(
+    r'\[(?P<attr>\w+)\s*(?P<op>=|\^=|\$=|\*=)\s*(?P<q>["\']?)(?P<val>[^"\'\]]*)(?P=q)\]'
+)
+
+
+def _esc_like(value: str) -> str:
+    """Escape SQL LIKE wildcards (_ and %) in a value and SQL-escape quotes."""
+    return value.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_").replace("'", "''")
+
+
+def _attr_to_condition(attr: str, op: str, value: str) -> str | None:
+    """Translate an attribute selector to a SQL WHERE fragment.
+
+    Supported attributes: name, type, language.
+    Operators: = (exact), *= (contains), ^= (startswith), $= (endswith).
+    """
+    col_map = {
+        "name": "name",
+        "type": "type",
+        "language": "language",
+    }
+    col = col_map.get(attr)
+    if col is None:
+        return None  # Unknown attribute — skip
+    if op == "=":
+        # Exact match uses =, not LIKE, so no wildcard escape needed
+        return f"{col} = '{_esc(value)}'"
+    # LIKE variants — escape _ and % to preserve literal meaning
+    val = _esc_like(value)
+    if op == "^=":
+        return f"{col} LIKE '{val}%' ESCAPE '\\'"
+    if op == "$=":
+        return f"{col} LIKE '%{val}' ESCAPE '\\'"
+    if op == "*=":
+        return f"{col} LIKE '%{val}%' ESCAPE '\\'"
+    return None
+
 
 def _selector_to_where(selector: str) -> str:
     """Translate a CSS-like selector to a SQL WHERE clause.
@@ -58,6 +96,12 @@ def _selector_to_where(selector: str) -> str:
     Handles:
       .class-name          → semantic_type = N
       .class-name#id-name  → semantic_type = N AND name = 'id-name'
+      .class-name[attr=v]  → ... AND attr = 'v'
+      .class-name[name^=_] → ... AND name LIKE '_%'
+
+    Also excludes syntax-only nodes (keyword tokens) via the flags byte
+    so `.fn` matches function_definition nodes but not the `def` keyword
+    token inside them.
 
     Returns a SQL boolean expression string.
     """
@@ -70,20 +114,34 @@ def _selector_to_where(selector: str) -> str:
     if m is None:
         # Fallback: match by tree-sitter type name directly
         if resolved and not resolved.startswith(":"):
-            return f"type = '{_esc(resolved)}'"
+            # Still exclude syntax-only tokens
+            return f"type = '{_esc(resolved)}' AND (flags & 1) = 0"
         return "1=1"
 
     cls = m.group("cls")
     id_name = m.group("id")
+    rest = m.group("rest") or ""
 
     conditions = []
 
     sem_code = _TAXONOMY_TO_SEMANTIC.get(cls)
     if sem_code is not None:
         conditions.append(f"semantic_type = {sem_code}")
+        # Exclude syntax-only tokens (keyword tokens like `def`, `class`)
+        conditions.append("(flags & 1) = 0")
 
     if id_name:
         conditions.append(f"name = '{_esc(id_name)}'")
+
+    # Parse attribute selectors from the rest
+    for attr_match in _ATTR_RE.finditer(rest):
+        attr_cond = _attr_to_condition(
+            attr_match.group("attr"),
+            attr_match.group("op"),
+            attr_match.group("val"),
+        )
+        if attr_cond:
+            conditions.append(attr_cond)
 
     if not conditions:
         return "1=1"

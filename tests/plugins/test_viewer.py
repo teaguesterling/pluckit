@@ -246,6 +246,34 @@ class TestRenderOutline:
         assert "def __init__" in output
 
 
+class TestSignatureTable:
+    def test_multi_match_signature_becomes_table(self, pluck):
+        # Sample has top_level_fn and main at module level
+        output = pluck.view(".fn { show: signature; }")
+        # Should be a markdown table
+        assert "| File | Line | Signature |" in output
+        assert "|---|---|---|" in output
+        # Both functions should appear as rows
+        assert "top_level_fn" in output
+        assert "main" in output
+
+    def test_single_match_signature_stays_code_block(self, pluck):
+        output = pluck.view(".fn#top_level_fn { show: signature; }")
+        # Should NOT be a table
+        assert "| File |" not in output
+        # Should be a code fence
+        assert "```python" in output
+        assert "def top_level_fn(x):" in output
+
+    def test_table_cell_escapes_pipes(self):
+        from pluckit.plugins.viewer import _escape_table_cell
+        assert _escape_table_cell("str | None") == "str \\| None"
+
+    def test_table_cell_flattens_multiline(self):
+        from pluckit.plugins.viewer import _escape_table_cell
+        assert _escape_table_cell("line 1\n    line 2") == "line 1 line 2"
+
+
 class TestNumericShow:
     def test_show_n_lines(self, pluck):
         # Get first 1 line of top_level_fn

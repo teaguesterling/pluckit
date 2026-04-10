@@ -524,7 +524,14 @@ class AstViewer(Plugin):
         return "\n\n".join(rendered_blocks)
 
     def _render_rule(self, plucker: Plucker, rule: Rule) -> list[str]:
-        """Run one rule's selector, apply its show mode, return rendered markdown blocks."""
+        """Run one rule's selector, apply its show mode, return rendered markdown blocks.
+
+        Special case: when ``show: signature`` is explicit and the rule matches
+        multiple nodes, collapse the matches into a single markdown table
+        instead of emitting one code fence per match. Tables are dramatically
+        more compact for bulk signature listings (the "list all test functions"
+        use case).
+        """
         # Get the selection via the existing Plucker path
         try:
             selection = plucker.find(rule.selector)
@@ -546,6 +553,12 @@ class AstViewer(Plugin):
             )
             show_value = ""
 
+        # Auto-collapse: if every node will render as a signature AND there are
+        # multiple matches, emit a table instead of individual code fences.
+        if show_value == "signature" and len(nodes) > 1:
+            table = self._render_signature_table(plucker, nodes)
+            return [table] if table else []
+
         rendered: list[str] = []
         for node in nodes:
             effective_show = show_value or _default_show(node)
@@ -553,6 +566,47 @@ class AstViewer(Plugin):
             if block:
                 rendered.append(block)
         return rendered
+
+    def _render_signature_table(self, plucker: Plucker, nodes: list[dict]) -> str:
+        """Render a list of matched nodes as a markdown table of signatures.
+
+        Columns: File, Line, Signature. Signature text is synthesized from
+        native extraction when available, with a text-extraction fallback.
+        Pipes and newlines in signatures are escaped for table safety.
+        """
+        rows: list[tuple[str, str, str]] = []
+        for node in nodes:
+            file_path = node["file_path"]
+            start_line = node["start_line"]
+            end_line = node["end_line"]
+            language = node.get("language", "") or ""
+
+            sig = _synthesize_signature(node)
+            if not sig:
+                lines = _read_file_lines(file_path)
+                sig = _extract_signature(lines, start_line, end_line, language)
+
+            if not sig:
+                continue
+
+            rel_path = self._relpath(plucker, file_path)
+            rows.append((
+                _escape_table_cell(rel_path),
+                str(start_line),
+                _escape_table_cell(sig),
+            ))
+
+        if not rows:
+            return ""
+
+        # Build markdown table
+        header = "| File | Line | Signature |"
+        sep = "|---|---|---|"
+        body = "\n".join(
+            f"| {file} | {line} | `{sig}` |"
+            for file, line, sig in rows
+        )
+        return f"{header}\n{sep}\n{body}"
 
     def _materialize_rows(self, selection) -> list[dict]:
         """Materialize a Selection as a list of row dicts.
@@ -788,3 +842,19 @@ class AstViewer(Plugin):
 def _esc(s: str) -> str:
     """Escape single quotes for SQL string interpolation."""
     return s.replace("'", "''")
+
+
+def _escape_table_cell(s: str) -> str:
+    """Escape a value for safe inclusion in a markdown table cell.
+
+    - Pipes become `\\|`
+    - Newlines collapse to spaces
+    - Backticks in signatures are doubled so they survive single-backtick wrapping
+    """
+    # Flatten multi-line values (multi-line signatures from text extraction)
+    flat = " ".join(line.strip() for line in s.splitlines())
+    # Escape pipes
+    flat = flat.replace("|", "\\|")
+    # Escape backticks so they work inside `...` wrapping
+    # (markdown lets you use doubled backticks to embed a single backtick)
+    return flat
