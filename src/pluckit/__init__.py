@@ -1,6 +1,7 @@
 """pluckit — a fluent API for querying, analyzing, and mutating source code."""
 from pluckit.plucker import Plucker
 from pluckit.plugins.base import Plugin, PluginRegistry
+from pluckit.plugins.history import Commit, History
 from pluckit.plugins.viewer import AstViewer
 from pluckit.selection import Selection
 from pluckit.types import DiffResult, InterfaceInfo, NodeInfo, PluckerError
@@ -61,6 +62,8 @@ __all__ = [
     "Plugin",
     "PluginRegistry",
     "AstViewer",
+    "History",
+    "Commit",
     # Data types
     "NodeInfo",
     "DiffResult",

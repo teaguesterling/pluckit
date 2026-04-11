@@ -225,6 +225,49 @@ Plugins can also register new semantic-type aliases by updating
 `pluckit.selectors.ALIASES`, but that's considered advanced — most
 plugins only need `methods` and `pseudo_classes`.
 
+### `History` — git history on AST selections
+
+```python
+from pluckit import Plucker, History
+
+pluck = Plucker(code="src/**/*.py", plugins=[History])
+fn = pluck.find(".fn#validate_token")
+
+# Every commit that touched the function's file, most-recent-first
+for commit in fn.history():
+    print(f"{commit.hash[:8]} {commit.author_name}: {commit.message}")
+
+# Distinct authors (email) for those commits
+print(fn.authors())
+
+# The function's body as it was at an old revision — AST-aware, so
+# it matches by (name, type), not by today's line range.
+print(fn.at("v0.1.0")[0])
+
+# Unified diff between HEAD and the old revision, per matched node.
+print(fn.diff("v0.1.0")[0])
+```
+
+| Method            | Returns               | Notes                                          |
+|-------------------|-----------------------|------------------------------------------------|
+| `history()`       | `list[Commit]`        | Deduplicated, sorted by date descending        |
+| `authors()`       | `list[str]` (emails)  | Sorted                                         |
+| `at(rev)`         | `list[str]`           | One entry per matched node; `""` if not found  |
+| `diff(rev)`       | `list[str]`           | Unified diff per matched node                  |
+| `blame()`         | (raises)              | **Deferred** — upstream-blocked on `duck_tails`|
+
+**Dependencies.** `History` requires the `duck_tails` DuckDB community
+extension (for `git_read`) and the `git` binary on `PATH` (for `git log
+--follow`). pluckit auto-installs `duck_tails` on first use; run
+`pluckit init` to provision eagerly.
+
+**Rename handling.** `history()` uses `git log --follow`, so commits
+that touched a file under a previous name are included. `at(rev)` /
+`diff(rev)` locate the node at the historical revision by name+type,
+so a pure rename is tracked as long as the node's name survives.
+Structural refactors (a method being pulled out of a class, a
+function being split) are not automatically tracked.
+
 ---
 
 ## Error handling

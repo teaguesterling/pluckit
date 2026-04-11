@@ -6,6 +6,61 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- **`History` pluckin** — a v0.2 plugin wrapping `duck_tails` for
+  git-history operations on AST selections. Four methods:
+  - `history()` — commits that touched each matched node's file
+    (rename-aware via `git log --follow`)
+  - `authors()` — distinct commit authors for those files
+  - `at(rev)` — source text of each matched node **as of revision
+    `rev`**, AST-aware: re-parses the file at the old revision and
+    looks the node up by `(name, type)` rather than naively slicing
+    by current line range
+  - `diff(rev)` — per-node unified diff between HEAD and `rev`, using
+    the same AST-aware node resolution
+- `Commit` dataclass exported from `pluckit` and `pluckit.plugins`
+  for typed access to the fields returned by `history()`.
+
+### Architecture notes
+
+- `history()` / `authors()` shell out to `git log --follow` because
+  `duck_tails`'s SQL surface has no line-range or file-history join
+  point — a pure-SQL implementation would require iterated
+  per-commit `git_diff_tree` calls with no lateral-join support.
+  Subprocess is faster, rename-aware for free, and simpler.
+- `at(rev)` / `diff(rev)` use `duck_tails.git_read` to fetch file
+  content at a revision, then re-parse via sitting_duck's `read_ast`
+  against a tempfile and look up the matching node with pluckit's
+  own selector compiler. When sitting_duck ships `ast_select` as a
+  community-extension release, that lookup becomes a one-line swap.
+- `blame()` is **deferred** — `duck_tails` has no `git_blame` table
+  function, and implementing line-level blame via iterated history
+  reads is prohibitively expensive. The method raises a
+  `PluckerError` pointing at the upstream tracker.
+
+### Changed
+
+- Bumped the `duckdb` dependency floor to `>=1.3.2` (required by
+  `duck_tails`).
+
+### Fixed
+
+- `Selection.filter(name__startswith="_")` was matching every
+  identifier because `_` is a SQL LIKE wildcard; now routes through
+  `_esc_like` and emits `ESCAPE '\\'`.
+- Compound selectors like `.fn:exported` silently dropped the
+  pseudo-class in `_selector_to_where`; the compiler now parses
+  `:pseudo` tokens from the selector tail and looks them up in the
+  `PseudoClassRegistry`.
+
+### Removed
+
+- Removed the five history-related stubs (`history`, `at`, `diff`,
+  `blame`, `authors`) from core `Selection`. They now live in the
+  `History` pluckin; calling them without loading the pluckin
+  raises a `PluckerError` with a pointer via `_KNOWN_PROVIDERS`.
+
 ## [0.1.0a1] — 2026-04-10
 
 First public alpha. Query, view, and mutate all work end-to-end.
