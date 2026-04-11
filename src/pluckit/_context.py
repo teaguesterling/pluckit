@@ -12,6 +12,35 @@ if TYPE_CHECKING:
     from pluckit.source import Source
 
 
+def _new_connection_with_fledgling(
+    repo: str,
+) -> tuple[duckdb.DuckDBPyConnection, bool]:
+    """Create a DuckDB connection with fledgling macros loaded if available.
+
+    Soft-dep on fledgling-mcp: if ``fledgling`` is importable and >= 0.7.0,
+    use ``fledgling.connect(init=False, root=repo, modules=[...])`` to get
+    a connection with code, source, repo, structural, and workflows macros
+    loaded. Otherwise fall back to a bare ``duckdb.connect()``.
+
+    Returns (connection, fledgling_loaded_bool). Consumers that rely on
+    fledgling macros (e.g. AstViewer._extract_outline's find_class_members
+    call) should guard those paths on ``_fledgling_loaded``.
+    """
+    try:
+        import fledgling
+    except ImportError:
+        return duckdb.connect(), False
+    try:
+        con = fledgling.connect(
+            init=False,
+            root=repo,
+            modules=["sandbox", "source", "code", "docs", "repo", "structural", "workflows"],
+        )
+        return con, True
+    except Exception:
+        return duckdb.connect(), False
+
+
 class _Context:
     """Internal DuckDB connection manager. Not user-facing — Plucker wraps this.
 
@@ -19,6 +48,12 @@ class _Context:
         ctx = _Context()                          # auto-connection, cwd as repo
         ctx = _Context(repo='/path/to/project')   # custom repo root
         ctx = _Context(db=existing_connection)     # reuse a connection
+
+    When an automatic connection is created and the ``fledgling`` package
+    is installed (fledgling-mcp >= 0.7.0), fledgling macros are loaded
+    into the connection. Plugin code can check ``self._fledgling_loaded``
+    to decide whether to use fledgling macros (e.g. find_class_members)
+    or fall back to inline SQL.
     """
 
     def __init__(
@@ -28,7 +63,11 @@ class _Context:
         db: duckdb.DuckDBPyConnection | None = None,
     ):
         self.repo = repo or os.getcwd()
-        self.db = db or duckdb.connect()
+        if db is not None:
+            self.db = db
+            self._fledgling_loaded = False
+        else:
+            self.db, self._fledgling_loaded = _new_connection_with_fledgling(self.repo)
         self._extensions_loaded = False
         self._ensure_extensions()
 

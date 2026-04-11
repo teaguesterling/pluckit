@@ -50,9 +50,18 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+fledgling = [
+    # Optional soft-dep: when installed, pluckit's _Context loads fledgling
+    # macros into the default connection so plugins (e.g. AstViewer) can
+    # call fledgling macros like find_class_members instead of hand-rolling
+    # SQL. Pluckit still works without fledgling — the plugins fall back
+    # to inline queries.
+    "fledgling-mcp>=0.7.0",
+]
 dev = [
     "pytest>=8.0",
     "ruff>=0.6",
+    "fledgling-mcp>=0.7.0",
 ]
 docs = [
     "mkdocs>=1.6",

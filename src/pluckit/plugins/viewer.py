@@ -906,47 +906,71 @@ class AstViewer(Plugin):
         # - assignments at class depth (dataclass fields, constants)
         # - expression statements (docstrings)
         #
-        # A Python class_definition's direct children are: `class`, name, `:`,
-        # `block`. The block contains the members. So members are at
-        # depth = class_depth + 2.
-        try:
-            file_path_esc = _esc(node['file_path'])
-            node_id = int(node['node_id'])
-            children = plucker._ctx.db.sql(
-                f"WITH target AS ( "
-                f"  SELECT node_id, depth, descendant_count "
-                f"  FROM read_ast('{file_path_esc}') "
-                f"  WHERE node_id = {node_id} "
-                f") "
-                f"SELECT c.node_id, c.type, c.name, c.start_line, c.end_line, c.language, "
-                f"       c.signature_type, c.parameters, c.modifiers, c.annotations, c.peek "
-                f"FROM read_ast('{file_path_esc}') c, target t "
-                f"WHERE c.node_id > t.node_id "
-                f"  AND c.node_id <= t.node_id + t.descendant_count "
-                f"  AND c.depth = t.depth + 2 "
-                f"  AND c.type IN ('function_definition', 'method_definition', "
-                f"                 'function_declaration', 'assignment', "
-                f"                 'expression_statement') "
-                f"ORDER BY c.start_line"
-            ).fetchall()
-        except Exception:
-            # Simpler fallback query
+        # Preferred path (fledgling-mcp >= 0.7.0 installed): use fledgling's
+        # find_class_members macro, which wraps sitting_duck's
+        # ast_class_members + a read_ast CTE and accepts a parameterized
+        # query. Cleaner than hand-rolling the CTE join here.
+        #
+        # Fallback path: the original inline CTE query, for environments
+        # without fledgling-mcp installed. Older sitting_duck versions
+        # may also lack signature_type/parameters/modifiers/annotations
+        # columns, so the fallback has its own nested try/except.
+        children: list[tuple] = []
+        if getattr(plucker._ctx, '_fledgling_loaded', False):
             try:
-                children = plucker._ctx.db.sql(
-                    f"SELECT node_id, type, name, start_line, end_line, language, "
-                    f"       NULL as signature_type, NULL as parameters, "
-                    f"       NULL as modifiers, NULL as annotations, peek "
-                    f"FROM read_ast('{_esc(node['file_path'])}') "
-                    f"WHERE node_id > {int(node['node_id'])} "
-                    f"  AND node_id <= {int(node['node_id'])} + "
-                    f"      (SELECT descendant_count FROM read_ast('{_esc(node['file_path'])}') "
-                    f"       WHERE node_id = {int(node['node_id'])}) "
-                    f"  AND type IN ('function_definition', 'method_definition', "
-                    f"               'function_declaration') "
-                    f"ORDER BY start_line"
+                children = plucker._ctx.db.execute(
+                    "SELECT node_id, type, name, start_line, end_line, language, "
+                    "       NULL AS signature_type, NULL AS parameters, "
+                    "       NULL AS modifiers, NULL AS annotations, peek "
+                    "FROM find_class_members(?, ?) "
+                    "WHERE type IN ('function_definition', 'method_definition', "
+                    "               'function_declaration', 'assignment', "
+                    "               'expression_statement') "
+                    "ORDER BY start_line",
+                    [node['file_path'], int(node['node_id'])],
                 ).fetchall()
             except Exception:
-                return parent_sig
+                children = []
+        if not children:
+            # Fallback: inline CTE query (no fledgling macros)
+            try:
+                file_path_esc = _esc(node['file_path'])
+                node_id = int(node['node_id'])
+                children = plucker._ctx.db.sql(
+                    f"WITH target AS ( "
+                    f"  SELECT node_id, depth, descendant_count "
+                    f"  FROM read_ast('{file_path_esc}') "
+                    f"  WHERE node_id = {node_id} "
+                    f") "
+                    f"SELECT c.node_id, c.type, c.name, c.start_line, c.end_line, c.language, "
+                    f"       c.signature_type, c.parameters, c.modifiers, c.annotations, c.peek "
+                    f"FROM read_ast('{file_path_esc}') c, target t "
+                    f"WHERE c.node_id > t.node_id "
+                    f"  AND c.node_id <= t.node_id + t.descendant_count "
+                    f"  AND c.depth = t.depth + 2 "
+                    f"  AND c.type IN ('function_definition', 'method_definition', "
+                    f"                 'function_declaration', 'assignment', "
+                    f"                 'expression_statement') "
+                    f"ORDER BY c.start_line"
+                ).fetchall()
+            except Exception:
+                # Simpler fallback query
+                try:
+                    children = plucker._ctx.db.sql(
+                        f"SELECT node_id, type, name, start_line, end_line, language, "
+                        f"       NULL as signature_type, NULL as parameters, "
+                        f"       NULL as modifiers, NULL as annotations, peek "
+                        f"FROM read_ast('{_esc(node['file_path'])}') "
+                        f"WHERE node_id > {int(node['node_id'])} "
+                        f"  AND node_id <= {int(node['node_id'])} + "
+                        f"      (SELECT descendant_count FROM read_ast('{_esc(node['file_path'])}') "
+                        f"       WHERE node_id = {int(node['node_id'])}) "
+                        f"  AND type IN ('function_definition', 'method_definition', "
+                        f"               'function_declaration') "
+                        f"ORDER BY start_line"
+                    ).fetchall()
+                except Exception:
+                    return parent_sig
 
         child_sigs: list[str] = []
         cols = ["node_id", "type", "name", "start_line", "end_line", "language",
