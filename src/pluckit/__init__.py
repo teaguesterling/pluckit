@@ -2,11 +2,12 @@
 from pluckit.plucker import Plucker
 from pluckit.plugins.base import Plugin, PluginRegistry
 from pluckit.plugins.viewer import AstViewer
+from pluckit.selection import Selection
 from pluckit.types import DiffResult, InterfaceInfo, NodeInfo, PluckerError
 
 
 def view(query: str, *, code: str = "**/*", format: str = "markdown") -> str:
-    """Module-level convenience: render a viewer query against the current directory.
+    """Module-level convenience: render a viewer query against a code corpus.
 
     Creates an ephemeral Plucker with the AstViewer plugin loaded, runs the
     query, and returns the rendered output. For repeated queries against the
@@ -20,14 +21,51 @@ def view(query: str, *, code: str = "**/*", format: str = "markdown") -> str:
     return pluck.view(query, format=format)
 
 
+def find(
+    selector: str,
+    *,
+    code: str = "**/*",
+    repo: str | None = None,
+) -> list[tuple[str, int, str]]:
+    """Module-level convenience: run a selector and return match locations.
+
+    Returns a list of ``(file_path, start_line, name)`` tuples. For the full
+    Selection API (navigation, mutation, filtering, terminal methods), use
+    ``Plucker.find`` instead:
+
+        from pluckit import Plucker
+        pluck = Plucker(code="src/**/*.py")
+        sel = pluck.find(".fn:exported")
+        print(sel.count(), sel.names())
+
+    This shortcut is designed for quick one-shot queries:
+
+        for path, line, name in find(".fn:exported", code="src/**/*.py"):
+            print(f"{path}:{line}:{name}")
+    """
+    pluck = Plucker(code=code, repo=repo)
+    selection = pluck.find(selector)
+    rows = selection.materialize()
+    return [
+        (row["file_path"], row["start_line"], row.get("name") or row.get("type", ""))
+        for row in rows
+    ]
+
+
 __all__ = [
+    # Core
     "Plucker",
+    "Selection",
+    "PluckerError",
+    # Plugins
     "Plugin",
     "PluginRegistry",
     "AstViewer",
-    "PluckerError",
+    # Data types
     "NodeInfo",
     "DiffResult",
     "InterfaceInfo",
+    # Module-level shortcuts
     "view",
+    "find",
 ]
