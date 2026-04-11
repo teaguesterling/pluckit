@@ -63,6 +63,14 @@ _ATTR_RE = re.compile(
     r'\[(?P<attr>\w+)\s*(?P<op>=|\^=|\$=|\*=)\s*(?P<q>["\']?)(?P<val>[^"\'\]]*)(?P=q)\]'
 )
 
+# Pseudo-class pattern: :name or :name(arg)
+# Matches a leading ':' followed by an identifier, plus an optional
+# parenthesized argument list. The argument body may contain commas so
+# we capture it lazily up to the matching close paren.
+_PSEUDO_RE = re.compile(
+    r":(?P<name>[a-zA-Z_][a-zA-Z0-9_-]*)(?:\((?P<arg>[^)]*)\))?"
+)
+
 
 def _esc_like(value: str) -> str:
     """Escape SQL LIKE wildcards (_ and %) in a value and SQL-escape quotes."""
@@ -156,6 +164,34 @@ def _selector_to_where(selector: str) -> str:
         )
         if attr_cond:
             conditions.append(attr_cond)
+
+    # Parse pseudo-classes from the rest (e.g., .fn:exported, .fn:public)
+    # Unknown pseudo-classes are skipped silently — the PseudoClassRegistry
+    # is authoritative about which ones compile to SQL.
+    from pluckit.selectors import PseudoClassRegistry
+
+    pseudo_registry = PseudoClassRegistry()
+    for pseudo_match in _PSEUDO_RE.finditer(rest):
+        pname = ":" + pseudo_match.group("name")
+        entry = pseudo_registry.get(pname)
+        if entry is None or not entry.sql_template:
+            continue
+        template = entry.sql_template
+        if entry.takes_arg:
+            arg = pseudo_match.group("arg") or ""
+            # Support both positional {arg} and {arg0}/{arg1} for two-arg forms
+            parts = [p.strip() for p in arg.split(",")] if arg else [""]
+            try:
+                if "{arg0}" in template or "{arg1}" in template:
+                    template = template.format(
+                        arg0=parts[0] if len(parts) > 0 else "",
+                        arg1=parts[1] if len(parts) > 1 else "",
+                    )
+                else:
+                    template = template.format(arg=_esc(parts[0]))
+            except (KeyError, IndexError):
+                continue
+        conditions.append(template)
 
     if not conditions:
         return "1=1"

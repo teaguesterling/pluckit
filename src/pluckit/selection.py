@@ -13,7 +13,7 @@ from typing import TYPE_CHECKING, Any
 
 import duckdb
 
-from pluckit._sql import _esc, _selector_to_where, descendant_join
+from pluckit._sql import _esc, _esc_like, _selector_to_where, descendant_join
 from pluckit.plugins.base import PluginRegistry
 from pluckit.types import PluckerError
 
@@ -194,11 +194,17 @@ class Selection:
                 if op not in _FILTER_SUFFIXES:
                     raise ValueError(f"Unknown filter keyword: {key}")
                 if op == "startswith":
-                    conditions.append(f"{field} LIKE '{_esc(str(value))}%'")
+                    conditions.append(
+                        f"{field} LIKE '{_esc_like(str(value))}%' ESCAPE '\\'"
+                    )
                 elif op == "endswith":
-                    conditions.append(f"{field} LIKE '%{_esc(str(value))}'")
+                    conditions.append(
+                        f"{field} LIKE '%{_esc_like(str(value))}' ESCAPE '\\'"
+                    )
                 elif op == "contains":
-                    conditions.append(f"{field} LIKE '%{_esc(str(value))}%'")
+                    conditions.append(
+                        f"{field} LIKE '%{_esc_like(str(value))}%' ESCAPE '\\'"
+                    )
                 elif op == "gt":
                     conditions.append(f"{field} > {value}")
                 elif op == "lt":
@@ -575,26 +581,7 @@ class Selection:
         from pluckit.mutations import Remove
         return MutationEngine(self._ctx).apply(self, Remove())
 
-    # ---------------------------------------------------------------
-    # History stubs — delegate to History (Task 7)
-    # ---------------------------------------------------------------
-
-    def history(self) -> Any:
-        """Return the git history for matched nodes."""
-        raise NotImplementedError("History not yet implemented")
-
-    def at(self, rev: str) -> Selection:
-        """Return nodes as they were at a specific git revision."""
-        raise NotImplementedError("History not yet implemented")
-
-    def diff(self, rev: str | None = None) -> Any:
-        """Structural diff of matched nodes."""
-        raise NotImplementedError("History not yet implemented")
-
-    def blame(self) -> Any:
-        """Git blame for matched nodes."""
-        raise NotImplementedError("History not yet implemented")
-
-    def authors(self) -> list[str]:
-        """Return authors who have modified matched nodes."""
-        raise NotImplementedError("History not yet implemented")
+    # History operations (history, at, diff, blame, authors) live in the
+    # History plugin — they depend on duck_tails and git state, not on the
+    # core AST query infrastructure. Load `pluckit.plugins.History` to use
+    # them. Tracked as Plucker Task 7 / task #38.
