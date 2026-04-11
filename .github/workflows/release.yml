@@ -1,0 +1,128 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+# Only one release job at a time, and never cancel an in-progress release.
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Build distributions
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # full history so hatch can see the tag
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install build
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install build
+      - name: Build wheel and sdist
+        run: python -m build
+      - name: Check distribution metadata
+        run: |
+          python -m pip install twine
+          python -m twine check dist/*
+      - name: Upload distributions
+        uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/
+          retention-days: 14
+
+  publish-pypi:
+    name: Publish to PyPI
+    runs-on: ubuntu-latest
+    needs: build
+    # The environment provides the OIDC trust anchor and (if you enable it)
+    # requires a human approval click before the publish step runs.
+    environment:
+      name: pypi
+      url: https://pypi.org/project/ast-pluckit/
+    permissions:
+      # Required for PyPI trusted-publisher OIDC exchange.
+      id-token: write
+    steps:
+      - name: Download built distributions
+        uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+        # No credentials here — uses OIDC against the trusted publisher
+        # configured on PyPI for this repo + this workflow filename.
+
+  github-release:
+    name: Create GitHub Release
+    runs-on: ubuntu-latest
+    needs: publish-pypi
+    permissions:
+      contents: write   # needed to create the release and upload assets
+    env:
+      # Sanitize all untrusted and context-provided values into env vars
+      # that are referenced as shell parameters, never interpolated into
+      # the script body. ${{ github.ref_name }} is technically attacker-
+      # controlled (tag name), so we treat it as opaque data.
+      TAG_NAME: ${{ github.ref_name }}
+      GH_REPO: ${{ github.repository }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Download built distributions
+        uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+      - name: Extract release notes from CHANGELOG
+        id: notes
+        run: |
+          set -euo pipefail
+          # Strip a single leading 'v' from the tag to look up the changelog heading.
+          VERSION="${TAG_NAME#v}"
+          # Find the section for this version in CHANGELOG.md. Export through
+          # awk's ENVIRON[] so the tag value can't inject into the awk program.
+          export VERSION
+          NOTES=$(awk '
+            BEGIN { found = 0; target = "[" ENVIRON["VERSION"] "]" }
+            /^## / {
+              if (found) { exit }
+              if (index($0, target) > 0) { found = 1; next }
+            }
+            found { print }
+          ' CHANGELOG.md || true)
+          if [ -z "${NOTES:-}" ]; then
+            NOTES="See [CHANGELOG.md](https://github.com/${GH_REPO}/blob/main/CHANGELOG.md) for details."
+          fi
+          # Pass multi-line output through $GITHUB_OUTPUT using a heredoc delimiter.
+          {
+            echo "notes<<EOF_NOTES"
+            printf '%s\n' "$NOTES"
+            echo "EOF_NOTES"
+          } >> "$GITHUB_OUTPUT"
+      - name: Create GitHub Release
+        env:
+          NOTES: ${{ steps.notes.outputs.notes }}
+        run: |
+          set -euo pipefail
+          # Detect pre-release based on the tag suffix.
+          PRERELEASE_FLAG=""
+          case "$TAG_NAME" in
+            *a[0-9]*|*b[0-9]*|*rc[0-9]*) PRERELEASE_FLAG="--prerelease" ;;
+          esac
+          gh release create "$TAG_NAME" \
+            --repo "$GH_REPO" \
+            --title "$TAG_NAME" \
+            --notes "$NOTES" \
+            $PRERELEASE_FLAG \
+            dist/*
