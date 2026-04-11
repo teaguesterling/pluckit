@@ -26,8 +26,9 @@ queries in Python and dispatches per-rule through the existing Plucker API.
 from __future__ import annotations
 
 import warnings
+from collections.abc import Iterator
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, overload
 
 from pluckit.plugins.base import Plugin
 from pluckit.types import PluckerError
@@ -51,6 +52,167 @@ class Rule:
             decls = "; ".join(f"{k}: {v}" for k, v in self.declarations.items())
             return f"Rule({self.selector!r}, {{{decls}}})"
         return f"Rule({self.selector!r})"
+
+
+# ---------------------------------------------------------------------------
+# Result types — View and ViewBlock
+# ---------------------------------------------------------------------------
+
+@dataclass(frozen=True)
+class ViewBlock:
+    """One rendered block in a view result.
+
+    Most blocks correspond to a single matched AST node (a function body, a
+    class outline, etc.). Aggregate blocks — like the auto-collapsed
+    signature table emitted when ``show: signature`` matches multiple nodes
+    — have ``file_path`` and the line fields set to ``None``, and a
+    ``show`` value like ``"signature-table"`` to distinguish them.
+    """
+
+    markdown: str
+    rule: Rule
+    show: str
+    file_path: str | None = None
+    start_line: int | None = None
+    end_line: int | None = None
+    name: str | None = None
+    node_type: str | None = None
+    language: str | None = None
+
+    @property
+    def is_aggregate(self) -> bool:
+        """True for blocks that don't correspond to a single node (e.g., tables)."""
+        return self.file_path is None
+
+
+class View:
+    """The result of a :meth:`Plucker.view` query.
+
+    Behaves like a string for backward compatibility — ``str(view)`` and
+    ``print(view)`` yield the concatenated rendered markdown — but also
+    exposes structured metadata about the blocks it contains.
+
+    Iteration yields :class:`ViewBlock` instances in render order:
+
+    .. code-block:: python
+
+        view = pluck.view(".fn:exported { show: signature; }")
+        print(view)                      # the whole markdown output
+        print(view.markdown)             # same thing, explicit
+        print(view.files)                # distinct file paths represented
+        for block in view:               # iterate per-block
+            print(block.name, block.start_line)
+
+    Supports ``len()``, ``bool()``, indexing (``view[0]``), slicing
+    (``view[:3]``), and containment (``"def main" in view``).
+    """
+
+    __slots__ = ("_blocks", "query", "format")
+
+    def __init__(
+        self,
+        blocks: list[ViewBlock],
+        query: str = "",
+        format: str = "markdown",
+    ) -> None:
+        self._blocks = list(blocks)
+        self.query = query
+        self.format = format
+
+    @property
+    def blocks(self) -> list[ViewBlock]:
+        """Return a fresh list of the view's blocks (safe to mutate)."""
+        return list(self._blocks)
+
+    @property
+    def markdown(self) -> str:
+        """The full rendered markdown output — all blocks joined by blank lines."""
+        return "\n\n".join(b.markdown for b in self._blocks if b.markdown)
+
+    @property
+    def files(self) -> list[str]:
+        """Distinct file paths represented in this view, in first-seen order.
+
+        Aggregate blocks (signature tables etc.) are skipped. This is the
+        set of files a human would want to open to see every match.
+        """
+        seen: set[str] = set()
+        out: list[str] = []
+        for b in self._blocks:
+            if b.file_path and b.file_path not in seen:
+                seen.add(b.file_path)
+                out.append(b.file_path)
+        return out
+
+    def to_dict(self) -> dict:
+        """Return a JSON-serializable representation of the view.
+
+        Useful for agents that want to consume the view structurally
+        rather than rendering it as markdown.
+        """
+        return {
+            "query": self.query,
+            "format": self.format,
+            "blocks": [
+                {
+                    "markdown": b.markdown,
+                    "show": b.show,
+                    "file_path": b.file_path,
+                    "start_line": b.start_line,
+                    "end_line": b.end_line,
+                    "name": b.name,
+                    "node_type": b.node_type,
+                    "language": b.language,
+                    "is_aggregate": b.is_aggregate,
+                }
+                for b in self._blocks
+            ],
+        }
+
+    def __str__(self) -> str:
+        return self.markdown
+
+    def __repr__(self) -> str:
+        return (
+            f"<View {len(self._blocks)} block(s) across "
+            f"{len(self.files)} file(s)>"
+        )
+
+    def __iter__(self) -> Iterator[ViewBlock]:
+        return iter(self._blocks)
+
+    def __len__(self) -> int:
+        return len(self._blocks)
+
+    def __bool__(self) -> bool:
+        return bool(self._blocks)
+
+    @overload
+    def __getitem__(self, index: int) -> ViewBlock: ...
+    @overload
+    def __getitem__(self, index: slice) -> list[ViewBlock]: ...
+    def __getitem__(self, index):
+        return self._blocks[index]
+
+    def __contains__(self, needle: object) -> bool:
+        """``"text" in view`` checks against the rendered markdown."""
+        if isinstance(needle, str):
+            return needle in self.markdown
+        return False
+
+    def __eq__(self, other: object) -> bool:
+        """Equality against another ``View`` compares block contents;
+        equality against a ``str`` compares against the rendered markdown
+        (for backward compatibility with the previous bare-string return).
+        """
+        if isinstance(other, View):
+            return self._blocks == other._blocks
+        if isinstance(other, str):
+            return self.markdown == other
+        return NotImplemented
+
+    def __hash__(self) -> int:
+        return hash(self.markdown)
 
 
 def parse_viewer_query(query: str) -> list[Rule]:
@@ -495,7 +657,7 @@ class AstViewer(Plugin):
     name = "AstViewer"
     methods = {"view": "view"}
 
-    def view(self, plucker: Plucker, query: str, *, format: str = "markdown") -> str:
+    def view(self, plucker: Plucker, query: str, *, format: str = "markdown") -> View:
         """Render matched code regions from a viewer query.
 
         Args:
@@ -505,7 +667,10 @@ class AstViewer(Plugin):
             format: Output format. ``markdown`` is the only supported format in v1.0.
 
         Returns:
-            A rendered string in the requested format. Empty string if no matches.
+            A :class:`View` object. Supports ``str()`` / ``print()`` for the
+            rendered markdown (backward-compatible with the v0.1 bare-string
+            return), plus ``.blocks``, ``.files``, ``.markdown``, and
+            ``.to_dict()`` for structured access. Empty if no rules match.
         """
         if format != "markdown":
             raise PluckerError(
@@ -514,22 +679,23 @@ class AstViewer(Plugin):
 
         rules = parse_viewer_query(query)
         if not rules:
-            return ""
+            return View(blocks=[], query=query, format=format)
 
-        rendered_blocks: list[str] = []
+        all_blocks: list[ViewBlock] = []
         for rule in rules:
-            rendered_blocks.extend(self._render_rule(plucker, rule))
+            all_blocks.extend(self._render_rule(plucker, rule))
 
-        return "\n\n".join(rendered_blocks)
+        return View(blocks=all_blocks, query=query, format=format)
 
-    def _render_rule(self, plucker: Plucker, rule: Rule) -> list[str]:
-        """Run one rule's selector, apply its show mode, return rendered markdown blocks.
+    def _render_rule(self, plucker: Plucker, rule: Rule) -> list[ViewBlock]:
+        """Run one rule's selector, apply its show mode, return ViewBlocks.
 
         Special case: when ``show: signature`` is explicit and the rule matches
         multiple nodes, collapse the matches into a single markdown table
         instead of emitting one code fence per match. Tables are dramatically
         more compact for bulk signature listings (the "list all test functions"
-        use case).
+        use case); the resulting block has ``file_path is None`` so callers
+        can detect aggregates.
         """
         # Get the selection via the existing Plucker path
         try:
@@ -555,15 +721,33 @@ class AstViewer(Plugin):
         # Auto-collapse: if every node will render as a signature AND there are
         # multiple matches, emit a table instead of individual code fences.
         if show_value == "signature" and len(nodes) > 1:
-            table = self._render_signature_table(plucker, nodes)
-            return [table] if table else []
+            table_md = self._render_signature_table(plucker, nodes)
+            if not table_md:
+                return []
+            return [ViewBlock(
+                markdown=table_md,
+                rule=rule,
+                show="signature-table",
+                # Aggregate: no single file/line association
+            )]
 
-        rendered: list[str] = []
+        rendered: list[ViewBlock] = []
         for node in nodes:
             effective_show = show_value or _default_show(node)
-            block = self._render_match(plucker, node, effective_show)
-            if block:
-                rendered.append(block)
+            md = self._render_match(plucker, node, effective_show)
+            if not md:
+                continue
+            rendered.append(ViewBlock(
+                markdown=md,
+                rule=rule,
+                show=effective_show,
+                file_path=node.get("file_path"),
+                start_line=node.get("start_line"),
+                end_line=node.get("end_line"),
+                name=node.get("name"),
+                node_type=node.get("type"),
+                language=node.get("language"),
+            ))
         return rendered
 
     def _render_signature_table(self, plucker: Plucker, nodes: list[dict]) -> str:

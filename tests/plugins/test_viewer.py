@@ -213,7 +213,7 @@ class TestRenderBody:
 
     def test_includes_location_header(self, pluck):
         output = pluck.view(".fn#top_level_fn")
-        lines = output.split("\n")
+        lines = output.markdown.split("\n")
         assert lines[0].startswith("# ")
         assert "sample.py:" in lines[0]
 
@@ -261,7 +261,7 @@ class TestSignatureTable:
         # It should appear as something like "1-3" or similar range
         import re
         # Find the row for top_level_fn and check it has a range
-        rows = [line for line in output.split("\n") if "top_level_fn" in line]
+        rows = [line for line in output.markdown.split("\n") if "top_level_fn" in line]
         assert rows, "top_level_fn row not found"
         # At least one row should contain a range like N-M
         assert any(re.search(r"\| \d+-\d+ \|", r) for r in rows), \
@@ -380,3 +380,125 @@ class TestPluckerIntegration:
     def test_unsupported_format_raises(self, pluck):
         with pytest.raises(PluckerError, match="format"):
             pluck.view(".fn#top_level_fn", format="pandoc")
+
+
+# ---------------------------------------------------------------------------
+# View result type — structured API around the rendered output
+# ---------------------------------------------------------------------------
+
+class TestViewReturnType:
+    """The view() methods now return a View object, not a bare string."""
+
+    def test_view_returns_View_instance(self, pluck):
+        from pluckit import View
+        result = pluck.view(".fn#top_level_fn")
+        assert isinstance(result, View)
+
+    def test_str_yields_markdown(self, pluck):
+        result = pluck.view(".fn#top_level_fn")
+        assert "def top_level_fn(x):" in str(result)
+        assert "```python" in str(result)
+
+    def test_markdown_property_matches_str(self, pluck):
+        result = pluck.view(".fn#top_level_fn")
+        assert result.markdown == str(result)
+
+    def test_contains_checks_markdown(self, pluck):
+        result = pluck.view(".fn#top_level_fn")
+        assert "def top_level_fn(x):" in result
+        assert "nonexistent_function" not in result
+
+    def test_equality_with_string_compat(self, pluck):
+        """A View compares equal to a string matching its markdown —
+        backward-compat for v0.1 tests that did `output == ""` checks."""
+        empty = pluck.view(".fn#nonexistent")
+        assert empty == ""
+        assert not empty  # __bool__ false
+
+    def test_len_returns_block_count(self, pluck):
+        result = pluck.view(".fn#top_level_fn")
+        assert len(result) == 1
+
+    def test_iterable_yields_ViewBlocks(self, pluck):
+        from pluckit import ViewBlock
+        result = pluck.view(".fn#top_level_fn")
+        blocks = list(result)
+        assert len(blocks) == 1
+        assert isinstance(blocks[0], ViewBlock)
+
+    def test_block_metadata_populated(self, pluck):
+        result = pluck.view(".fn#top_level_fn")
+        block = result[0]
+        assert block.name == "top_level_fn"
+        assert block.show == "body"
+        assert block.language == "python"
+        assert block.start_line is not None
+        assert block.end_line is not None
+        assert block.file_path is not None
+        assert block.node_type == "function_definition"
+        assert not block.is_aggregate
+
+    def test_files_property(self, pluck):
+        result = pluck.view(".fn")
+        # With default "body" show, non-aggregate — each block has a file_path
+        assert len(result.files) >= 1
+        assert all(f.endswith(".py") for f in result.files)
+
+    def test_signature_table_is_aggregate_block(self, pluck):
+        """Multi-match `show: signature` becomes ONE aggregate block — not
+        N separate blocks."""
+        result = pluck.view(".fn { show: signature; }")
+        assert len(result) == 1
+        block = result[0]
+        assert block.is_aggregate
+        assert block.file_path is None
+        assert block.start_line is None
+        assert block.show == "signature-table"
+        assert "| File | Lines | Signature |" in block.markdown
+
+    def test_aggregate_blocks_not_in_files(self, pluck):
+        """An aggregate-only view should have an empty .files list — the
+        signature table isn't tied to a single file."""
+        result = pluck.view(".fn { show: signature; }")
+        assert result.files == []
+
+    def test_multi_rule_produces_multiple_blocks(self, pluck):
+        query = ".fn#top_level_fn { show: signature; } .fn#main { show: body; }"
+        result = pluck.view(query)
+        # One block per rule (both single-match, so no table collapse)
+        assert len(result) == 2
+        names = [b.name for b in result]
+        assert "top_level_fn" in names
+        assert "main" in names
+
+    def test_slice_returns_list_of_blocks(self, pluck):
+        query = ".fn#top_level_fn { show: signature; } .fn#main { show: body; }"
+        result = pluck.view(query)
+        first_only = result[:1]
+        assert isinstance(first_only, list)
+        assert len(first_only) == 1
+
+    def test_to_dict_is_json_serializable(self, pluck):
+        import json
+        result = pluck.view(".fn#top_level_fn")
+        d = result.to_dict()
+        # Round-trip through JSON
+        round_tripped = json.loads(json.dumps(d))
+        assert round_tripped["query"] == ".fn#top_level_fn"
+        assert round_tripped["format"] == "markdown"
+        assert len(round_tripped["blocks"]) == 1
+        assert round_tripped["blocks"][0]["name"] == "top_level_fn"
+
+    def test_repr_summarizes_shape(self, pluck):
+        result = pluck.view(".fn#top_level_fn")
+        r = repr(result)
+        assert "View" in r
+        assert "1 block" in r
+
+    def test_empty_view_is_falsy_and_has_empty_markdown(self, pluck):
+        empty = pluck.view(".fn#does_not_exist")
+        assert not empty
+        assert len(empty) == 0
+        assert empty.markdown == ""
+        assert empty.files == []
+        assert list(empty) == []

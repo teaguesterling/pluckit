@@ -10,6 +10,7 @@ from pluckit.types import PluckerError
 if TYPE_CHECKING:
     import duckdb
 
+    from pluckit.plugins.viewer import View
     from pluckit.selection import Selection
     from pluckit.source import Source
 
@@ -56,11 +57,12 @@ class Plucker:
         from pluckit.source import Source
         return Source(path, self._ctx, self._registry)
 
-    def view(self, query: str, *, format: str = "markdown") -> str:
+    def view(self, query: str, *, format: str = "markdown") -> View:
         """Render matched code regions from a viewer query.
 
         Requires the AstViewer plugin to be registered. Convenience wrapper
-        that delegates to the plugin if present.
+        that delegates to the plugin if present. Returns a :class:`View`
+        object — see ``pluckit.plugins.viewer.View`` for the full surface.
         """
         if "view" not in self._registry.methods:
             raise PluckerError(

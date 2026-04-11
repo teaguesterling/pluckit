@@ -52,7 +52,7 @@ fns = pluck.find(".fn:exported")
 #### `view(selector: str, *, format: str = "markdown") -> str`
 
 Render matched nodes as markdown (the `AstViewer` plugin must be
-registered):
+registered). Returns a :class:`View` object — see below.
 
 ```python
 print(pluck.view(".fn#main { show: signature; }"))
@@ -170,6 +170,79 @@ for path, line, name in find(".fn:exported", code="src/**/*.py"):
 ```
 
 These create an ephemeral Plucker, run the query, and tear it down.
+
+---
+
+## `View` and `ViewBlock`
+
+`Plucker.view()` and the module-level `pluckit.view()` return a `View`
+object — not a plain string. A `View` behaves like a string for the
+common "print the rendered markdown" case, but also exposes structured
+metadata about the blocks it contains.
+
+```python
+from pluckit import Plucker, AstViewer, View, ViewBlock
+
+pluck = Plucker(code="src/**/*.py", plugins=[AstViewer])
+result: View = pluck.view(".fn:exported { show: signature; }")
+
+# Rendered output — backward compatible with the v0.1 bare-string return
+print(result)                    # prints the markdown
+print(str(result))               # same thing
+print(result.markdown)           # explicit accessor
+assert "def authenticate" in result   # __contains__ checks the markdown
+
+# Structured access
+print(result.files)              # ['src/auth.py', 'src/users.py', ...]
+print(len(result))               # number of blocks
+for block in result:             # iterate as ViewBlock
+    print(block.name, block.start_line, block.show)
+
+# JSON export
+import json
+print(json.dumps(result.to_dict(), indent=2))
+```
+
+### `View` methods and properties
+
+| Member            | Type                    | Description                                  |
+|-------------------|-------------------------|----------------------------------------------|
+| `markdown`        | `str`                   | Full rendered output                         |
+| `blocks`          | `list[ViewBlock]`       | Fresh list of contained blocks               |
+| `files`           | `list[str]`             | Distinct file paths, in first-seen order     |
+| `query`           | `str`                   | The query string that produced this view     |
+| `format`          | `str`                   | Output format (`markdown` in v0.1)           |
+| `to_dict()`       | `dict`                  | JSON-serializable representation             |
+| `str(v)` / `print`| `str`                   | Same as `.markdown`                          |
+| `len(v)`          | `int`                   | Number of blocks                             |
+| `bool(v)`         | `bool`                  | `False` for empty views                      |
+| `for b in v`      | `Iterator[ViewBlock]`   | Iterate blocks in render order               |
+| `v[i]` / `v[a:b]` | `ViewBlock` / `list`    | Indexing and slicing                         |
+| `"s" in v`        | `bool`                  | Substring check against `.markdown`          |
+
+### `ViewBlock` fields
+
+Each `ViewBlock` is a frozen dataclass with:
+
+| Field          | Type          | Description                                        |
+|----------------|---------------|----------------------------------------------------|
+| `markdown`     | `str`         | Rendered content for this block                    |
+| `rule`         | `Rule`        | The query rule that produced it                    |
+| `show`         | `str`         | Resolved show mode (`body`, `signature`, …)        |
+| `file_path`    | `str \| None` | Source file — `None` for aggregates                |
+| `start_line`   | `int \| None` | Start line — `None` for aggregates                 |
+| `end_line`     | `int \| None` | End line — `None` for aggregates                   |
+| `name`         | `str \| None` | Identifier name, if any                            |
+| `node_type`    | `str \| None` | AST node type (`function_definition`, …)          |
+| `language`     | `str \| None` | Source language                                    |
+| `is_aggregate` | `bool`        | `True` for multi-match signature tables and such   |
+
+**Aggregate blocks.** When a rule like `.fn { show: signature; }` matches
+many nodes, the viewer auto-collapses the output into a single markdown
+table. That collapse produces a single `ViewBlock` with `is_aggregate =
+True` and `file_path`, `start_line`, `end_line` all `None`. Use
+`block.is_aggregate` (or `block.file_path is None`) to distinguish
+per-node blocks from aggregates.
 
 ---
 

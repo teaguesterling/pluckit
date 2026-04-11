@@ -125,7 +125,7 @@ def _cmd_view(argv: list[str]) -> int:
             print(f"pluckit view: unexpected error: {e}", file=sys.stderr)
             return 1
         if result:
-            outputs.append(result)
+            outputs.append(result.markdown)
 
     output = "\n\n".join(outputs)
     if args.output:

@@ -2,21 +2,23 @@
 from pluckit.plucker import Plucker
 from pluckit.plugins.base import Plugin, PluginRegistry
 from pluckit.plugins.history import Commit, History
-from pluckit.plugins.viewer import AstViewer
+from pluckit.plugins.viewer import AstViewer, View, ViewBlock
 from pluckit.selection import Selection
 from pluckit.types import DiffResult, InterfaceInfo, NodeInfo, PluckerError
 
 
-def view(query: str, *, code: str = "**/*", format: str = "markdown") -> str:
+def view(query: str, *, code: str = "**/*", format: str = "markdown") -> View:
     """Module-level convenience: render a viewer query against a code corpus.
 
     Creates an ephemeral Plucker with the AstViewer plugin loaded, runs the
-    query, and returns the rendered output. For repeated queries against the
-    same workspace, construct a Plucker explicitly:
+    query, and returns the rendered :class:`View`. For repeated queries
+    against the same workspace, construct a Plucker explicitly:
 
         from pluckit import Plucker, AstViewer
         pluck = Plucker(code="src/**/*.py", plugins=[AstViewer])
-        pluck.view(".fn#main")
+        result = pluck.view(".fn#main")
+        print(result)           # markdown output
+        print(result.files)     # file paths touched
     """
     pluck = Plucker(code=code, plugins=[AstViewer])
     return pluck.view(query, format=format)
@@ -64,6 +66,9 @@ __all__ = [
     "AstViewer",
     "History",
     "Commit",
+    # View result types
+    "View",
+    "ViewBlock",
     # Data types
     "NodeInfo",
     "DiffResult",

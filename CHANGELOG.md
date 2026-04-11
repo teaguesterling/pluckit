@@ -8,6 +8,23 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- **`View` return type for `Plucker.view()`**. Previously `view()`
+  returned a bare `str` of rendered markdown. It now returns a
+  structured `View` object that:
+  - Stringifies to the markdown output (``str(v)``, ``print(v)``,
+    ``f"{v}"`` all work as before)
+  - Supports ``len(v)``, ``bool(v)``, iteration (``for block in v``),
+    indexing (``v[0]``), slicing (``v[:3]``), and containment
+    (``"def main" in v``)
+  - Exposes ``.markdown``, ``.blocks``, ``.files``, and
+    ``.to_dict()`` for structured consumers (agents, JSON pipelines)
+  - Wraps each rendered block in a frozen ``ViewBlock`` dataclass
+    with ``name``, ``file_path``, ``start_line``, ``end_line``,
+    ``node_type``, ``language``, ``show``, and ``rule`` fields
+  - Treats multi-match signature tables as a single aggregate
+    ``ViewBlock`` (with ``file_path`` / ``start_line`` / ``end_line``
+    all ``None`` and ``show == "signature-table"``) so consumers can
+    detect auto-collapsed output
 - **`History` pluckin** — a v0.2 plugin wrapping `duck_tails` for
   git-history operations on AST selections. Four methods:
   - `history()` — commits that touched each matched node's file
@@ -43,6 +60,13 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 - Bumped the `duckdb` dependency floor to `>=1.3.2` (required by
   `duck_tails`).
+- **Breaking:** `Plucker.view()` and the module-level `pluckit.view()`
+  now return a `View` object instead of a bare `str`. Code that
+  treated the return as a string directly (e.g.,
+  ``pluck.view(q).split("\n")``) must switch to the ``.markdown``
+  accessor (``pluck.view(q).markdown.split("\n")``) or wrap with
+  ``str(...)``. Idiomatic uses — ``print(v)``, ``f"{v}"``,
+  ``"needle" in v``, ``v == ""`` — continue to work unchanged.
 
 ### Fixed
 
