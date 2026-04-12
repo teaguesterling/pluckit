@@ -36,4 +36,4 @@ class Source:
 
         sql = ast_select_sql(self._resolved_glob, selector)
         rel = self._ctx.db.sql(sql)
-        return Selection(rel, self._ctx, self._registry)
+        return Selection(rel, self._ctx, self._registry, _op=("find", (selector,), {}))

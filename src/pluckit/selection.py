@@ -55,10 +55,12 @@ _FILTER_SUFFIXES = {"startswith", "endswith", "contains", "gt", "lt", "gte", "lt
 class Selection:
     """A lazy set of AST nodes backed by a DuckDB relation."""
 
-    def __init__(self, relation: duckdb.DuckDBPyRelation, context: Context, registry: PluginRegistry | None = None) -> None:
+    def __init__(self, relation: duckdb.DuckDBPyRelation, context: Context, registry: PluginRegistry | None = None, *, _parent: Selection | None = None, _op: tuple | None = None) -> None:
         self._rel = relation
         self._ctx = context
         self._registry = registry
+        self._parent = _parent
+        self._op = _op  # e.g. ("find", (".fn",), {})
 
     def __getattr__(self, name: str):
         """Delegate unknown attributes to plugin registry."""
@@ -105,9 +107,14 @@ class Selection:
         """Unregister a temp view."""
         self._ctx.db.unregister(name)
 
-    def _new(self, rel: duckdb.DuckDBPyRelation) -> Selection:
+    @property
+    def relation(self):
+        """The underlying DuckDB relation."""
+        return self._rel
+
+    def _new(self, rel: duckdb.DuckDBPyRelation, *, op: tuple | None = None) -> Selection:
         """Create a new Selection sharing the same context."""
-        return Selection(rel, self._ctx, self._registry)
+        return Selection(rel, self._ctx, self._registry, _parent=self, _op=op)
 
     def _file_paths(self) -> list[str]:
         """Get distinct file paths from this selection."""
@@ -154,7 +161,7 @@ class Selection:
         except Exception:
             self._unregister(sel_view)
             raise
-        return self._new(rel)
+        return self._new(rel, op=("find", (selector,), {}))
 
     def filter_sql(self, where_clause: str) -> Selection:
         """Filter nodes using a raw SQL WHERE clause."""
@@ -164,7 +171,7 @@ class Selection:
         except Exception:
             self._unregister(view)
             raise
-        return self._new(rel)
+        return self._new(rel, op=("filter_sql", (where_clause,), {}))
 
     def filter(self, *pseudo_selectors: str, **kwargs: Any) -> Selection:
         """Filter nodes by CSS pseudo-classes and/or keyword arguments.
@@ -227,12 +234,16 @@ class Selection:
             return self
 
         where = " AND ".join(conditions)
-        return self.filter_sql(where)
+        result = self.filter_sql(where)
+        result._op = ("filter", pseudo_selectors, kwargs)
+        return result
 
     def not_(self, selector: str) -> Selection:
         """Exclude nodes matching selector (anti-join)."""
         where = _selector_to_where(selector)
-        return self.filter_sql(f"NOT ({where})")
+        result = self.filter_sql(f"NOT ({where})")
+        result._op = ("not_", (selector,), {})
+        return result
 
     def unique(self) -> Selection:
         """Deduplicate nodes by (file_path, node_id)."""
@@ -244,7 +255,7 @@ class Selection:
         except Exception:
             self._unregister(view)
             raise
-        return self._new(rel)
+        return self._new(rel, op=("unique", (), {}))
 
     # ---------------------------------------------------------------
     # Navigation — each returns a new Selection
@@ -264,7 +275,7 @@ class Selection:
         except Exception:
             self._unregister(sel_view)
             raise
-        return self._new(rel)
+        return self._new(rel, op=("parent", (), {}))
 
     def children(self) -> Selection:
         """Navigate to direct children of current nodes."""
@@ -280,7 +291,7 @@ class Selection:
         except Exception:
             self._unregister(sel_view)
             raise
-        return self._new(rel)
+        return self._new(rel, op=("children", (), {}))
 
     def siblings(self) -> Selection:
         """Navigate to sibling nodes (same parent, different node_id)."""
@@ -298,7 +309,7 @@ class Selection:
         except Exception:
             self._unregister(sel_view)
             raise
-        return self._new(rel)
+        return self._new(rel, op=("siblings", (), {}))
 
     def ancestor(self, selector: str) -> Selection:
         """Navigate to ancestor nodes matching selector.
@@ -320,7 +331,7 @@ class Selection:
         except Exception:
             self._unregister(sel_view)
             raise
-        return self._new(rel)
+        return self._new(rel, op=("ancestor", (selector,), {}))
 
     def next(self) -> Selection:
         """Navigate to the next sibling (sibling_index + 1)."""
@@ -338,7 +349,7 @@ class Selection:
         except Exception:
             self._unregister(sel_view)
             raise
-        return self._new(rel)
+        return self._new(rel, op=("next", (), {}))
 
     def prev(self) -> Selection:
         """Navigate to the previous sibling (sibling_index - 1)."""
@@ -356,7 +367,7 @@ class Selection:
         except Exception:
             self._unregister(sel_view)
             raise
-        return self._new(rel)
+        return self._new(rel, op=("prev", (), {}))
 
     # ---------------------------------------------------------------
     # Addressing
@@ -380,19 +391,77 @@ class Selection:
             if src and src[0] and text in src[0]:
                 matching_ids.append(node_id)
         if not matching_ids:
-            return self.filter_sql("1 = 0")
+            result = self.filter_sql("1 = 0")
+            result._op = ("containing", (text,), {})
+            return result
         ids_str = ", ".join(str(i) for i in matching_ids)
-        return self.filter_sql(f"node_id IN ({ids_str})")
+        result = self.filter_sql(f"node_id IN ({ids_str})")
+        result._op = ("containing", (text,), {})
+        return result
 
     def at_line(self, line: int) -> Selection:
         """Filter to nodes that span the given line number."""
-        return self.filter_sql(f"start_line <= {line} AND end_line >= {line}")
+        result = self.filter_sql(f"start_line <= {line} AND end_line >= {line}")
+        result._op = ("at_line", (line,), {})
+        return result
 
     def at_lines(self, start: int, end: int) -> Selection:
         """Filter to nodes that overlap with the given line range."""
-        return self.filter_sql(
+        result = self.filter_sql(
             f"start_line <= {end} AND end_line >= {start}"
         )
+        result._op = ("at_lines", (start, end), {})
+        return result
+
+    # ---------------------------------------------------------------
+    # Dunder methods
+    # ---------------------------------------------------------------
+
+    def _chain_repr(self):
+        """Build a string representation of the chain that produced this selection."""
+        parts = []
+        current = self
+        while current is not None and current._op is not None:
+            name, args, kwargs = current._op
+            arg_strs = [repr(a) for a in args]
+            arg_strs.extend(f"{k}={v!r}" for k, v in kwargs.items())
+            parts.append(f".{name}({', '.join(arg_strs)})")
+            current = current._parent
+        parts.reverse()
+        return "".join(parts)
+
+    def __repr__(self):
+        chain = self._chain_repr()
+        try:
+            n = self.count()
+            return f"<Selection{chain} [{n} nodes]>"
+        except Exception:
+            return f"<Selection{chain}>"
+
+    def __str__(self):
+        view = self._register("str")
+        try:
+            rows = self._ctx.db.sql(
+                f"SELECT name, file_path, start_line, end_line "
+                f"FROM {view} ORDER BY file_path, start_line"
+            ).fetchall()
+        finally:
+            self._unregister(view)
+        if not rows:
+            return "(empty selection)"
+        lines = []
+        for name, fp, sl, el in rows:
+            lines.append(f"  {name or '(unnamed)':30s} {fp}:{sl}-{el}")
+        return f"Selection ({len(rows)} nodes):\n" + "\n".join(lines)
+
+    def __iter__(self):
+        return iter(self.materialize())
+
+    def __len__(self):
+        return self.count()
+
+    def __bool__(self):
+        return self.count() > 0
 
     # ---------------------------------------------------------------
     # Terminal ops — materialize and return data

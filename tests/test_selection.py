@@ -165,3 +165,67 @@ class TestAddressing:
         matches = sel.at_lines(4, 9)
         assert matches.count() >= 1
         assert "validate_token" in matches.names()
+
+
+class TestDunderMethods:
+    def test_repr_basic(self, ctx):
+        sel = ctx.source("src/auth.py").find(".function")
+        r = repr(sel)
+        assert "Selection" in r
+        assert "nodes" in r
+
+    def test_repr_shows_chain(self, ctx):
+        sel = ctx.source("src/auth.py").find(".function").containing("return None")
+        r = repr(sel)
+        assert "find" in r
+        assert "containing" in r
+
+    def test_str_shows_nodes(self, ctx):
+        sel = ctx.source("src/auth.py").find(".function")
+        s = str(sel)
+        assert "validate_token" in s
+        assert "auth.py" in s
+
+    def test_str_empty(self, ctx):
+        sel = ctx.source("src/auth.py").find(".function#nonexistent")
+        s = str(sel)
+        assert "empty" in s
+
+    def test_iter(self, ctx):
+        sel = ctx.source("src/auth.py").find(".function")
+        items = list(sel)
+        assert len(items) >= 4
+        assert all(isinstance(item, dict) for item in items)
+        assert "name" in items[0]
+
+    def test_len(self, ctx):
+        sel = ctx.source("src/auth.py").find(".function")
+        assert len(sel) >= 4
+
+    def test_bool_true(self, ctx):
+        sel = ctx.source("src/auth.py").find(".function")
+        assert bool(sel) is True
+
+    def test_bool_false(self, ctx):
+        sel = ctx.source("src/auth.py").find(".function#nonexistent")
+        assert bool(sel) is False
+
+    def test_relation_property(self, ctx):
+        sel = ctx.source("src/auth.py").find(".function")
+        rel = sel.relation
+        assert hasattr(rel, 'columns')
+        assert hasattr(rel, 'fetchall')
+        assert 'name' in rel.columns
+
+    def test_parent_tracking(self, ctx):
+        base = ctx.source("src/auth.py").find(".function")
+        filtered = base.containing("return None")
+        assert filtered._parent is base
+        assert filtered._op[0] == "containing"
+
+    def test_parent_none_for_initial(self, ctx):
+        sel = ctx.source("src/auth.py").find(".function")
+        # The find() creates a selection with parent being the source selection
+        # but the source selection itself has no parent op
+        assert sel._op is not None
+        assert sel._op[0] == "find"
