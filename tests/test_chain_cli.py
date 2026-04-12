@@ -1,9 +1,12 @@
 """Tests for chain CLI argv parsing."""
 from __future__ import annotations
 
+import textwrap
+
 import pytest
 
 from pluckit.chain import Chain, ChainStep
+from pluckit.cli import main
 
 
 class TestFromArgv:
@@ -87,3 +90,91 @@ class TestFromArgv:
     def test_empty_argv_raises(self):
         with pytest.raises(SystemExit):
             Chain.from_argv([])
+
+
+@pytest.fixture
+def cli_repo(tmp_path):
+    src = tmp_path / "src"
+    src.mkdir()
+    (src / "app.py").write_text(textwrap.dedent("""\
+        def greet(name):
+            return f"hello {name}"
+
+        def farewell(name):
+            return f"goodbye {name}"
+
+        def _private():
+            pass
+    """))
+    return tmp_path
+
+
+class TestCliChainExecution:
+    def test_find_count(self, cli_repo, capsys):
+        result = main([str(cli_repo / "src/*.py"), "find", ".fn", "count"])
+        assert result == 0
+        out = capsys.readouterr().out.strip()
+        assert out.isdigit()
+        assert int(out) >= 3
+
+    def test_find_names(self, cli_repo, capsys):
+        result = main([str(cli_repo / "src/*.py"), "find", ".fn:exported", "names"])
+        assert result == 0
+        out = capsys.readouterr().out
+        assert "greet" in out
+        assert "_private" not in out
+
+    def test_mutation(self, cli_repo):
+        result = main([str(cli_repo / "src/*.py"), "find", ".fn#greet", "rename", "salute"])
+        assert result == 0
+        assert "def salute" in (cli_repo / "src" / "app.py").read_text()
+
+    def test_group_separator(self, cli_repo):
+        result = main([
+            str(cli_repo / "src/*.py"),
+            "find", ".fn#greet", "rename", "salute",
+            "--",
+            "find", ".fn#farewell", "rename", "adieu",
+        ])
+        assert result == 0
+        content = (cli_repo / "src" / "app.py").read_text()
+        assert "def salute" in content
+        assert "def adieu" in content
+
+    def test_to_json_output(self, cli_repo, capsys):
+        import json
+        result = main(["--to-json", str(cli_repo / "src/*.py"), "find", ".fn", "count"])
+        assert result == 0
+        d = json.loads(capsys.readouterr().out)
+        assert "source" in d
+        assert "steps" in d
+
+    def test_json_input(self, cli_repo, capsys):
+        import json
+        chain_json = json.dumps({
+            "source": [str(cli_repo / "src/*.py")],
+            "steps": [{"op": "find", "args": [".fn"]}, {"op": "count"}],
+        })
+        result = main(["--json", chain_json])
+        assert result == 0
+        out = capsys.readouterr().out.strip()
+        assert out.isdigit()
+
+    def test_init_still_works(self, capsys):
+        result = main(["init"])
+        assert result == 0
+
+    def test_version_still_works(self, capsys):
+        result = main(["--version"])
+        assert result == 0
+        assert "pluckit" in capsys.readouterr().out
+
+    def test_help_flag(self, capsys):
+        result = main(["--help"])
+        assert result == 0
+        assert "pluckit" in capsys.readouterr().out
+
+    def test_no_args_shows_help(self, capsys):
+        result = main([])
+        assert result == 0
+        assert "pluckit" in capsys.readouterr().out
