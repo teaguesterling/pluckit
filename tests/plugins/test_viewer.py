@@ -502,3 +502,62 @@ class TestViewReturnType:
         assert empty.markdown == ""
         assert empty.files == []
         assert list(empty) == []
+
+
+# ---------------------------------------------------------------------------
+# View.relation and View.tabular
+# ---------------------------------------------------------------------------
+
+class TestViewRelation:
+    def test_relation_has_columns(self, pluck):
+        v = pluck.view(".fn")
+        rel = v.relation
+        assert "file_path" in rel.columns
+        assert "name" in rel.columns
+        assert "start_line" in rel.columns
+
+    def test_relation_has_rows(self, pluck):
+        v = pluck.view(".fn")
+        rel = v.relation
+        rows = rel.fetchall()
+        assert len(rows) >= 1
+
+    def test_relation_excludes_aggregates(self, pluck):
+        v = pluck.view(".fn { show: signature; }")
+        rel = v.relation
+        rows = rel.fetchall()
+        # Aggregate blocks (signature tables) should be excluded
+        # Each row should have a non-null file_path
+        for row in rows:
+            assert row[0] is not None  # file_path
+
+    def test_empty_relation(self, pluck):
+        v = pluck.view(".fn#nonexistent")
+        rel = v.relation
+        rows = rel.fetchall()
+        assert rows == []
+        assert "file_path" in rel.columns
+
+    def test_tabular_no_connection_needed(self):
+        from pluckit.plugins.viewer import View, ViewBlock
+        blocks = [
+            ViewBlock(markdown="# test", rule=None, show="source",
+                     file_path="test.py", start_line=1, end_line=5,
+                     name="test_fn", node_type="function", language="python"),
+        ]
+        v = View(blocks)
+        cols, rows = v.tabular
+        assert cols[0] == "file_path"
+        assert len(rows) == 1
+        assert rows[0][0] == "test.py"
+
+    def test_relation_without_db_raises(self):
+        from pluckit.plugins.viewer import View, ViewBlock
+        blocks = [
+            ViewBlock(markdown="# test", rule=None, show="source",
+                     file_path="test.py", start_line=1, end_line=5,
+                     name="test_fn", node_type="function", language="python"),
+        ]
+        v = View(blocks)  # no db
+        with pytest.raises(PluckerError, match="no database connection"):
+            v.relation

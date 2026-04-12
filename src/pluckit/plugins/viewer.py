@@ -30,6 +30,7 @@ from collections.abc import Iterator
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, overload
 
+from pluckit._sql import _esc
 from pluckit.plugins.base import Plugin
 from pluckit.types import PluckerError
 
@@ -107,17 +108,20 @@ class View:
     (``view[:3]``), and containment (``"def main" in view``).
     """
 
-    __slots__ = ("_blocks", "query", "format")
+    __slots__ = ("_blocks", "query", "format", "_db")
 
     def __init__(
         self,
         blocks: list[ViewBlock],
         query: str = "",
         format: str = "markdown",
+        *,
+        db=None,
     ) -> None:
         self._blocks = list(blocks)
         self.query = query
         self.format = format
+        self._db = db
 
     @property
     def blocks(self) -> list[ViewBlock]:
@@ -143,6 +147,66 @@ class View:
                 seen.add(b.file_path)
                 out.append(b.file_path)
         return out
+
+    # -- tabular / relation helpers ----------------------------------
+
+    _BLOCK_COLS = (
+        "file_path", "name", "node_type", "start_line", "end_line", "language",
+    )
+
+    def _non_aggregate_rows(self) -> list[tuple]:
+        """Collect per-node metadata rows (excludes aggregate blocks)."""
+        rows: list[tuple] = []
+        for b in self._blocks:
+            if b.is_aggregate:
+                continue
+            rows.append((
+                b.file_path, b.name, b.node_type,
+                b.start_line, b.end_line, b.language,
+            ))
+        return rows
+
+    @property
+    def tabular(self) -> tuple[list[str], list[tuple]]:
+        """Block metadata as ``(columns, rows)`` -- no connection needed."""
+        return list(self._BLOCK_COLS), self._non_aggregate_rows()
+
+    @property
+    def relation(self):
+        """A DuckDB relation of block metadata (excluding aggregates).
+
+        Requires that a database connection was passed at construction time
+        (the ``AstViewer`` plugin does this automatically).
+        """
+        if self._db is None:
+            raise PluckerError(
+                "View has no database connection -- cannot create relation"
+            )
+        cols = self._BLOCK_COLS
+        rows = self._non_aggregate_rows()
+
+        if not rows:
+            col_defs = ", ".join(
+                f"NULL::{'INTEGER' if c in ('start_line', 'end_line') else 'VARCHAR'} AS {c}"
+                for c in cols
+            )
+            return self._db.sql(f"SELECT {col_defs} WHERE 1=0")
+
+        def _val(v, col: str) -> str:
+            if v is None:
+                return "NULL"
+            if col in ("start_line", "end_line"):
+                return str(int(v))
+            return f"'{_esc(str(v))}'"
+
+        value_rows = ", ".join(
+            "(" + ", ".join(_val(v, c) for v, c in zip(r, cols)) + ")"
+            for r in rows
+        )
+        col_list = ", ".join(cols)
+        return self._db.sql(
+            f"SELECT * FROM (VALUES {value_rows}) AS t({col_list})"
+        )
 
     def to_dict(self) -> dict:
         """Return a JSON-serializable representation of the view.
@@ -678,14 +742,15 @@ class AstViewer(Plugin):
             )
 
         rules = parse_viewer_query(query)
+        db = plucker._ctx.db
         if not rules:
-            return View(blocks=[], query=query, format=format)
+            return View(blocks=[], query=query, format=format, db=db)
 
         all_blocks: list[ViewBlock] = []
         for rule in rules:
             all_blocks.extend(self._render_rule(plucker, rule))
 
-        return View(blocks=all_blocks, query=query, format=format)
+        return View(blocks=all_blocks, query=query, format=format, db=db)
 
     def _render_rule(self, plucker: Plucker, rule: Rule) -> list[ViewBlock]:
         """Run one rule's selector, apply its show mode, return ViewBlocks.
