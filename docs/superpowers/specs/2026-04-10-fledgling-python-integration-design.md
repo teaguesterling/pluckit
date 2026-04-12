@@ -92,7 +92,7 @@ Public signature is unchanged. The `format` parameter is preserved for forward c
 
 ## What pluckit does NOT absorb
 
-Per the cross-package design, pluckit stays mechanical. These concerns live in squawkit, not pluckit:
+Per the cross-package design, pluckit stays mechanical. These concerns live in squackit, not pluckit:
 
 - Smart defaults inference
 - Session cache
@@ -107,7 +107,7 @@ Pluckit's plugin system is for extending the fluent API (new selectors, sources,
 Pluckit's role in the new layering is "jQuery for fledgling" — a fluent, chainable, per-call API with no session memory. The case for making pluckit stateful was considered and rejected:
 
 - A stateful Plucker would force every pluckit consumer (CLI tools, notebooks, tests) to reason about session boundaries they don't want
-- Squawkit needs stateful behavior for its MCP-server use case, and owns it there
+- Squackit needs stateful behavior for its MCP-server use case, and owns it there
 - Two overlapping stateful layers create ambiguity about which cache is consulted when
 - jQuery's longevity comes from staying mechanical; pluckit can do the same
 
@@ -116,13 +116,13 @@ Pluckit's role in the new layering is "jQuery for fledgling" — a fluent, chain
 After this change:
 
 ```
-squawkit  →  pluckit  →  fledgling-python  →  fledgling (SQL)
+squackit  →  pluckit  →  fledgling-python  →  fledgling (SQL)
 ```
 
-The invariant: squawkit calls pluckit chains or invokes fledgling macros via pluckit's macro-call proxy — never directly through fledgling-python. Benefits:
+The invariant: squackit calls pluckit chains or invokes fledgling macros via pluckit's macro-call proxy — never directly through fledgling-python. Benefits:
 
-- squawkit's view of fledgling is mediated by pluckit, so pluckit API changes propagate naturally
-- Any capability squawkit needs becomes part of pluckit's public API, which other consumers benefit from
+- squackit's view of fledgling is mediated by pluckit, so pluckit API changes propagate naturally
+- Any capability squackit needs becomes part of pluckit's public API, which other consumers benefit from
 - Avoids two parallel Python layers that could drift in output shape, error handling, or naming
 
 ## Migration steps (for implementation plan)
@@ -143,5 +143,5 @@ The invariant: squawkit calls pluckit chains or invokes fledgling macros via plu
 ## Cross-references
 
 - **fledgling reorg:** `/mnt/aux-data/teague/Projects/source-sextant/main/docs/superpowers/specs/2026-04-10-fledgling-reorg-design.md`
-- **squawkit design:** `~/Projects/squawkit/docs/superpowers/specs/2026-04-10-squawkit-design.md`
+- **squackit design:** `~/Projects/squackit/docs/superpowers/specs/2026-04-10-squackit-design.md`
 - **lackpy reorg-prep:** `~/Projects/lackpy/trees/feature/interpreter-plugins/docs/superpowers/specs/2026-04-10-sql-macro-reorg-prep.md`
