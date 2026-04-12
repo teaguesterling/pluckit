@@ -4,6 +4,7 @@ from __future__ import annotations
 import pytest
 
 from pluckit.chain import Chain, ChainStep
+from pluckit.plugins.base import resolve_plugins
 
 
 class TestChainStep:
@@ -111,3 +112,21 @@ class TestChainSerialization:
     def test_chain_from_dict_requires_steps(self):
         with pytest.raises(ValueError, match="steps"):
             Chain.from_dict({"source": ["a.py"]})
+
+
+class TestPluginResolution:
+    def test_resolve_known_plugins(self):
+        classes = resolve_plugins(["AstViewer", "History"])
+        assert len(classes) == 2
+        from pluckit.plugins.history import History
+        from pluckit.plugins.viewer import AstViewer
+        assert AstViewer in classes
+        assert History in classes
+
+    def test_resolve_unknown_plugin_raises(self):
+        from pluckit.types import PluckerError
+        with pytest.raises(PluckerError, match="Unknown plugin"):
+            resolve_plugins(["NonexistentPlugin"])
+
+    def test_resolve_empty_list(self):
+        assert resolve_plugins([]) == []

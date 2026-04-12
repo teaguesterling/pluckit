@@ -14,6 +14,43 @@ _KNOWN_PROVIDERS: dict[str, str] = {
     "view": "AstViewer",
 }
 
+_PLUGIN_MAP: dict[str, str] = {
+    "AstViewer": "pluckit.plugins.viewer:AstViewer",
+    "History": "pluckit.plugins.history:History",
+}
+
+
+def resolve_plugins(names: list[str]) -> list[type[Plugin]]:
+    """Resolve plugin names to classes.
+
+    Accepts short names ("AstViewer") or fully-qualified import
+    paths ("mypackage.plugins:MyPlugin").
+    """
+    import importlib
+
+    classes: list[type[Plugin]] = []
+    for name in names:
+        if name in _PLUGIN_MAP:
+            dotted = _PLUGIN_MAP[name]
+        elif ":" in name:
+            dotted = name
+        else:
+            raise PluckerError(
+                f"Unknown plugin {name!r}. Known plugins: "
+                f"{', '.join(sorted(_PLUGIN_MAP.keys()))}. "
+                f"For custom plugins, use 'module.path:ClassName'."
+            )
+        module_path, class_name = dotted.rsplit(":", 1)
+        try:
+            mod = importlib.import_module(module_path)
+            cls = getattr(mod, class_name)
+        except (ImportError, AttributeError) as e:
+            raise PluckerError(
+                f"Failed to import plugin {name!r} from {dotted!r}: {e}"
+            ) from e
+        classes.append(cls)
+    return classes
+
 
 class Plugin:
     """Base class for pluckit plugins."""
