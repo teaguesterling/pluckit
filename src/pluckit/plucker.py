@@ -23,6 +23,10 @@ class Plucker:
         plugins: Plugin classes or instances to register.
         repo: Repository root (defaults to cwd). Globs resolve relative to this.
         db: Existing DuckDB connection to reuse.
+        profile: Fledgling profile (e.g. ``'analyst'``). When given without
+            *modules*, fledgling loads the profile's default module set.
+        modules: Fledgling SQL modules to load (e.g. ``['source', 'code']``).
+        init: Fledgling init-file path, ``False`` to skip, ``None`` to auto-discover.
     """
 
     def __init__(
@@ -32,14 +36,28 @@ class Plucker:
         plugins: list[type[Plugin] | Plugin] | None = None,
         repo: str | None = None,
         db: duckdb.DuckDBPyConnection | None = None,
+        profile: str | None = None,
+        modules: list[str] | None = None,
+        init: str | bool | None = False,
     ):
-        self._ctx = _Context(repo=repo, db=db)
+        self._ctx = _Context(repo=repo, db=db, profile=profile, modules=modules, init=init)
         self._registry = PluginRegistry()
         self._code_source = code
 
         for p in (plugins or []):
             instance = p() if isinstance(p, type) else p
             self._registry.register(instance)
+
+    @property
+    def connection(self):
+        """The underlying database connection.
+
+        When fledgling is installed, this is a :class:`fledgling.Connection`
+        proxy that exposes auto-generated macro wrappers (e.g.
+        ``plucker.connection.project_overview()``). Without fledgling, it
+        is a bare :class:`duckdb.DuckDBPyConnection`.
+        """
+        return self._ctx.db
 
     def find(self, selector: str) -> Selection:
         """Query the configured code source."""

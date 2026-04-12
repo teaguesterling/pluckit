@@ -7,7 +7,11 @@ from pluckit import Plucker
 def test_plucker_creates_connection():
     pluck = Plucker()
     assert pluck._ctx.db is not None
-    assert isinstance(pluck._ctx.db, duckdb.DuckDBPyConnection)
+    # When fledgling-mcp is installed, db is a fledgling.Connection proxy
+    # wrapping a DuckDBPyConnection; otherwise it's the raw connection.
+    # Both expose the same .sql / .execute / .fetchone interface.
+    assert hasattr(pluck._ctx.db, "sql")
+    assert hasattr(pluck._ctx.db, "execute")
 
 
 def test_plucker_loads_sitting_duck():

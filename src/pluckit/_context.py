@@ -12,6 +12,49 @@ if TYPE_CHECKING:
     from pluckit.source import Source
 
 
+_DEFAULT_MODULES = [
+    "sandbox", "source", "code", "docs", "repo", "structural", "workflows",
+]
+
+
+def _new_connection_with_fledgling(
+    repo: str,
+    *,
+    profile: str | None = None,
+    modules: list[str] | None = None,
+    init: str | bool | None = False,
+) -> tuple[duckdb.DuckDBPyConnection, bool]:
+    """Create a DuckDB connection with fledgling macros loaded if available.
+
+    Soft-dep on fledgling-mcp: if ``fledgling`` is importable and >= 0.7.0,
+    use ``fledgling.connect(...)`` to get a macro-enabled connection.
+    Otherwise fall back to a bare ``duckdb.connect()``.
+
+    When *profile* is given without *modules*, fledgling loads the default
+    module set for that profile (typically includes all standard modules
+    plus diagnostics).  When neither is given, pluckit's own default
+    module list is used (a curated subset sufficient for code analysis).
+
+    Returns (connection, fledgling_loaded_bool).
+    """
+    try:
+        import fledgling
+    except ImportError:
+        return duckdb.connect(), False
+    try:
+        kwargs: dict = {"init": init, "root": repo}
+        if profile is not None:
+            kwargs["profile"] = profile
+        if modules is not None:
+            kwargs["modules"] = modules
+        elif profile is None:
+            kwargs["modules"] = _DEFAULT_MODULES
+        con = fledgling.connect(**kwargs)
+        return con, True
+    except Exception:
+        return duckdb.connect(), False
+
+
 class _Context:
     """Internal DuckDB connection manager. Not user-facing — Plucker wraps this.
 
@@ -19,6 +62,12 @@ class _Context:
         ctx = _Context()                          # auto-connection, cwd as repo
         ctx = _Context(repo='/path/to/project')   # custom repo root
         ctx = _Context(db=existing_connection)     # reuse a connection
+
+    When an automatic connection is created and the ``fledgling`` package
+    is installed (fledgling-mcp >= 0.7.0), fledgling macros are loaded
+    into the connection. Plugin code can check ``self._fledgling_loaded``
+    to decide whether to use fledgling macros (e.g. find_class_members)
+    or fall back to inline SQL.
     """
 
     def __init__(
@@ -26,9 +75,18 @@ class _Context:
         *,
         repo: str | None = None,
         db: duckdb.DuckDBPyConnection | None = None,
+        profile: str | None = None,
+        modules: list[str] | None = None,
+        init: str | bool | None = False,
     ):
         self.repo = repo or os.getcwd()
-        self.db = db or duckdb.connect()
+        if db is not None:
+            self.db = db
+            self._fledgling_loaded = False
+        else:
+            self.db, self._fledgling_loaded = _new_connection_with_fledgling(
+                self.repo, profile=profile, modules=modules, init=init,
+            )
         self._extensions_loaded = False
         self._ensure_extensions()
 
