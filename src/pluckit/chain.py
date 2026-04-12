@@ -110,3 +110,182 @@ class Chain:
     def from_json(cls, text: str) -> Chain:
         """Deserialise from a JSON string."""
         return cls.from_dict(json.loads(text))
+
+    # ------------------------------------------------------------------
+    # Evaluation
+    # ------------------------------------------------------------------
+
+    _TERMINAL_OPS = frozenset({
+        "count", "names", "text", "attr", "complexity", "materialize",
+    })
+    _QUERY_OPS = frozenset({
+        "find", "filter", "filter_sql", "not_", "unique",
+    })
+    _NAV_OPS = frozenset({
+        "parent", "children", "siblings", "ancestor",
+        "next", "prev", "containing", "at_line", "at_lines",
+    })
+    _MUTATION_OPS = frozenset({
+        "replaceWith", "addParam", "removeParam", "addArg", "removeArg",
+        "insertBefore", "insertAfter", "rename", "prepend", "append",
+        "wrap", "unwrap", "remove",
+    })
+    _PLUGIN_OPS = frozenset({
+        "view", "history", "authors", "at", "diff", "blame",
+    })
+
+    def evaluate(self) -> dict[str, Any]:
+        """Execute this chain and return a JSON-serializable result dict.
+
+        The evaluator resolves plugins, creates a Plucker, then walks the
+        steps in order, dispatching each to the appropriate method.  A
+        **selection stack** is maintained so that ``find`` pushes,
+        ``pop`` pops, and ``reset`` / ``--`` clears.
+        """
+        from pluckit.plucker import Plucker
+        from pluckit.plugins.base import resolve_plugins
+        from pluckit.selection import Selection
+
+        # Resolve plugins
+        plugin_classes = resolve_plugins(self.plugins)
+
+        # Build Plucker — currently only supports single source string
+        code = self.source[0] if len(self.source) == 1 else self.source[0]
+        plucker = Plucker(code=code, plugins=plugin_classes, repo=self.repo)
+
+        stack: list[Selection] = []
+        current: Selection | None = None
+        last_find_selector: str | None = None
+        had_mutation = False
+        result_type: str | None = None
+        result_data: Any = None
+
+        for step in self.steps:
+            op = step.op
+
+            # Control ops
+            if op in ("reset", "--"):
+                stack.clear()
+                current = None
+                continue
+
+            if op == "pop":
+                if stack:
+                    current = stack.pop()
+                else:
+                    current = None
+                continue
+
+            # find — push current onto stack, create new selection
+            if op == "find":
+                if current is not None:
+                    stack.append(current)
+                    current = current.find(*step.args, **step.kwargs)
+                else:
+                    current = plucker.find(*step.args, **step.kwargs)
+                last_find_selector = step.args[0] if step.args else None
+                continue
+
+            # view — special handling, called on plucker
+            if op == "view":
+                if step.args:
+                    query = step.args[0]
+                elif last_find_selector:
+                    query = last_find_selector
+                else:
+                    query = ".fn"
+                view_result = plucker.view(query)
+                result_type = "view"
+                result_data = view_result.to_dict()
+                continue
+
+            # Terminal ops
+            if op in self._TERMINAL_OPS:
+                if current is None:
+                    msg = f"Terminal op '{op}' requires a selection (use find first)"
+                    raise ValueError(msg)
+                method = getattr(current, op)
+                raw = method(*step.args, **step.kwargs)
+                result_type = op
+                result_data = _make_json_safe(raw)
+                continue
+
+            # Query / navigation / mutation ops — all operate on current selection
+            if op in self._QUERY_OPS | self._NAV_OPS | self._MUTATION_OPS:
+                if current is None:
+                    msg = f"Op '{op}' requires a selection (use find first)"
+                    raise ValueError(msg)
+                method = getattr(current, op)
+                current = method(*step.args, **step.kwargs)
+                if op in self._MUTATION_OPS:
+                    had_mutation = True
+                continue
+
+            # Plugin ops (other than view, handled above)
+            if op in self._PLUGIN_OPS:
+                if current is None:
+                    msg = f"Plugin op '{op}' requires a selection (use find first)"
+                    raise ValueError(msg)
+                method = getattr(current, op)
+                raw = method(*step.args, **step.kwargs)
+                result_type = op
+                result_data = _make_json_safe(raw)
+                continue
+
+            msg = f"Unknown chain op: {op!r}"
+            raise ValueError(msg)
+
+        # Build final result
+        if result_type is not None:
+            return {
+                "chain": self.to_dict(),
+                "type": result_type,
+                "data": result_data,
+            }
+
+        # No terminal was hit
+        if had_mutation:
+            return {
+                "chain": self.to_dict(),
+                "type": "mutation",
+                "data": {"applied": True},
+            }
+
+        # Default: materialize the current selection
+        if current is not None:
+            rows = current.materialize()
+            return {
+                "chain": self.to_dict(),
+                "type": "materialize",
+                "data": _make_json_safe(rows),
+            }
+
+        return {
+            "chain": self.to_dict(),
+            "type": "materialize",
+            "data": [],
+        }
+
+
+def _make_json_safe(obj: Any) -> Any:
+    """Recursively convert non-JSON-safe types to safe equivalents."""
+    import datetime
+    from decimal import Decimal
+
+    if obj is None or isinstance(obj, (bool, int, float, str)):
+        return obj
+    if isinstance(obj, Decimal):
+        # Use int if it's a whole number, otherwise float
+        if obj == int(obj):
+            return int(obj)
+        return float(obj)
+    if isinstance(obj, (datetime.datetime, datetime.date, datetime.time)):
+        return obj.isoformat()
+    if isinstance(obj, bytes):
+        return obj.decode("utf-8", errors="replace")
+    if isinstance(obj, dict):
+        return {str(k): _make_json_safe(v) for k, v in obj.items()}
+    if isinstance(obj, (list, tuple)):
+        return [_make_json_safe(item) for item in obj]
+    # Fallback: try str()
+    return str(obj)

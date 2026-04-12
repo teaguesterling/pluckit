@@ -1,6 +1,9 @@
 """Tests for Chain and ChainStep data model and JSON serialization."""
 from __future__ import annotations
 
+import json
+import textwrap
+
 import pytest
 
 from pluckit.chain import Chain, ChainStep
@@ -130,3 +133,148 @@ class TestPluginResolution:
 
     def test_resolve_empty_list(self):
         assert resolve_plugins([]) == []
+
+
+# ---------------------------------------------------------------------------
+# Chain.evaluate() tests
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def eval_repo(tmp_path):
+    src = tmp_path / "src"
+    src.mkdir()
+    (src / "app.py").write_text(textwrap.dedent("""\
+        def greet(name):
+            return f"hello {name}"
+
+        def farewell(name):
+            return f"goodbye {name}"
+
+        def _private():
+            pass
+    """))
+    return tmp_path
+
+
+class TestChainEvaluate:
+    def test_find_count(self, eval_repo):
+        chain = Chain(
+            source=[str(eval_repo / "src" / "app.py")],
+            steps=[
+                ChainStep(op="find", args=[".fn"]),
+                ChainStep(op="count"),
+            ],
+        )
+        result = chain.evaluate()
+        assert result["type"] == "count"
+        assert result["data"] >= 3
+
+    def test_find_names(self, eval_repo):
+        chain = Chain(
+            source=[str(eval_repo / "src" / "app.py")],
+            steps=[
+                ChainStep(op="find", args=[".fn:exported"]),
+                ChainStep(op="names"),
+            ],
+        )
+        result = chain.evaluate()
+        assert result["type"] == "names"
+        assert "greet" in result["data"]
+        assert "_private" not in result["data"]
+
+    def test_find_view(self, eval_repo):
+        chain = Chain(
+            source=[str(eval_repo / "src" / "app.py")],
+            steps=[
+                ChainStep(op="find", args=[".fn#greet"]),
+                ChainStep(op="view"),
+            ],
+            plugins=["AstViewer"],
+        )
+        result = chain.evaluate()
+        assert result["type"] == "view"
+        # The view data should contain something about greet
+        assert "greet" in str(result["data"])
+
+    def test_mutation_chain(self, eval_repo):
+        chain = Chain(
+            source=[str(eval_repo / "src" / "app.py")],
+            steps=[
+                ChainStep(op="find", args=[".fn#greet"]),
+                ChainStep(op="addParam", args=["debug: bool = False"]),
+            ],
+        )
+        result = chain.evaluate()
+        assert result["type"] == "mutation"
+        assert result["data"]["applied"] is True
+        content = (eval_repo / "src" / "app.py").read_text()
+        assert "debug: bool = False" in content
+
+    def test_result_includes_chain(self, eval_repo):
+        chain = Chain(
+            source=[str(eval_repo / "src" / "app.py")],
+            steps=[
+                ChainStep(op="find", args=[".fn"]),
+                ChainStep(op="count"),
+            ],
+        )
+        result = chain.evaluate()
+        assert "chain" in result
+        assert result["chain"]["steps"][0]["op"] == "find"
+
+    def test_reset_creates_new_find_context(self, eval_repo):
+        chain = Chain(
+            source=[str(eval_repo / "src" / "app.py")],
+            steps=[
+                ChainStep(op="find", args=[".fn#greet"]),
+                ChainStep(op="rename", args=["salute"]),
+                ChainStep(op="reset"),
+                ChainStep(op="find", args=[".fn#farewell"]),
+                ChainStep(op="rename", args=["adieu"]),
+            ],
+        )
+        chain.evaluate()
+        content = (eval_repo / "src" / "app.py").read_text()
+        assert "salute" in content
+        assert "adieu" in content
+
+    def test_pop_returns_to_previous_selection(self, eval_repo):
+        chain = Chain(
+            source=[str(eval_repo / "src" / "app.py")],
+            steps=[
+                ChainStep(op="find", args=[".fn"]),
+                ChainStep(op="find", args=[".fn#greet"]),
+                ChainStep(op="pop"),
+                ChainStep(op="count"),
+            ],
+        )
+        result = chain.evaluate()
+        assert result["type"] == "count"
+        # After pop we should be back to all functions, not just greet
+        assert result["data"] >= 3
+
+    def test_default_terminal_is_materialize(self, eval_repo):
+        chain = Chain(
+            source=[str(eval_repo / "src" / "app.py")],
+            steps=[
+                ChainStep(op="find", args=[".fn"]),
+            ],
+        )
+        result = chain.evaluate()
+        assert result["type"] == "materialize"
+        assert isinstance(result["data"], list)
+
+    def test_evaluate_returns_json_serializable(self, eval_repo):
+        chain = Chain(
+            source=[str(eval_repo / "src" / "app.py")],
+            steps=[
+                ChainStep(op="find", args=[".fn"]),
+                ChainStep(op="materialize"),
+            ],
+        )
+        result = chain.evaluate()
+        # Should survive round-trip through JSON
+        serialized = json.dumps(result)
+        restored = json.loads(serialized)
+        assert restored["type"] == "materialize"
