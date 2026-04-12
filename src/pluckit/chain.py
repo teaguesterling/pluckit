@@ -18,6 +18,7 @@ pluckit workflows:
 from __future__ import annotations
 
 import json
+import sys
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -61,6 +62,122 @@ class Chain:
     plugins: list[str] = field(default_factory=list)
     repo: str | None = None
     dry_run: bool = False
+    json_input: bool = False
+    json_output: bool = False
+
+    _KNOWN_OPS: frozenset[str] = frozenset({
+        # Query
+        "find", "filter", "filter_sql", "not_",
+        # Navigation
+        "unique", "parent", "children", "siblings", "ancestor",
+        "next", "prev", "containing", "at_line", "at_lines",
+        # Mutation
+        "replaceWith", "replace", "addParam", "removeParam",
+        "addArg", "removeArg", "insertBefore", "insertAfter",
+        "rename", "prepend", "append", "wrap", "unwrap", "remove",
+        "clearBody",
+        # Terminals
+        "count", "names", "text", "attr", "complexity", "materialize",
+        # Plugin ops
+        "view", "history", "authors", "at", "diff", "blame",
+        # Control
+        "reset", "pop",
+    })
+
+    @classmethod
+    def from_argv(cls, argv: list[str]) -> Chain:
+        """Parse shell-style CLI arguments into a Chain.
+
+        Raises ``SystemExit`` for empty *argv* or unrecoverable parse
+        errors, consistent with argparse conventions.
+        """
+        if not argv:
+            print("usage: pluckit [FLAGS] SOURCE STEP [STEP...]", file=sys.stderr)  # noqa: T201
+            raise SystemExit(2)
+
+        plugins: list[str] = []
+        repo: str | None = None
+        dry_run = False
+        json_input = False
+        json_output = False
+        source: list[str] | None = None
+
+        # Phase 1: consume global flags
+        i = 0
+        while i < len(argv):
+            tok = argv[i]
+            if tok in ("--plugin", "-p"):
+                i += 1
+                plugins.append(argv[i])
+            elif tok in ("--repo", "-r"):
+                i += 1
+                repo = argv[i]
+            elif tok in ("--dry-run", "-n"):
+                dry_run = True
+            elif tok == "--json":
+                json_input = True
+            elif tok == "--to-json":
+                json_output = True
+            elif tok in ("-c", "--code"):
+                source = ["code"]
+            elif tok in ("-d", "--docs"):
+                source = ["docs"]
+            elif tok in ("-t", "--tests"):
+                source = ["tests"]
+            else:
+                # First non-flag token — source (unless shortcut set it)
+                if source is None:
+                    source = [tok]
+                else:
+                    # source already set by shortcut; this token starts steps
+                    break
+                i += 1
+                break
+            i += 1
+
+        if source is None:
+            print("usage: pluckit [FLAGS] SOURCE STEP [STEP...]", file=sys.stderr)  # noqa: T201
+            raise SystemExit(2)
+
+        # Phase 2: parse steps from remaining tokens
+        remaining = argv[i:]
+        steps: list[ChainStep] = []
+        current_step: ChainStep | None = None
+
+        for tok in remaining:
+            if tok == "--":
+                # Flush current step then insert reset
+                if current_step is not None:
+                    steps.append(current_step)
+                    current_step = None
+                steps.append(ChainStep(op="reset"))
+            elif tok in cls._KNOWN_OPS:
+                # Flush previous step, start new one
+                if current_step is not None:
+                    steps.append(current_step)
+                current_step = ChainStep(op=tok)
+            elif tok.startswith("--") and "=" in tok:
+                # kwarg for current step
+                key, _, value = tok[2:].partition("=")
+                if current_step is not None:
+                    current_step.kwargs[key] = value
+            else:
+                # positional arg for current step
+                if current_step is not None:
+                    current_step.args.append(tok)
+
+        if current_step is not None:
+            steps.append(current_step)
+
+        return cls(
+            source=source,
+            steps=steps,
+            plugins=plugins,
+            repo=repo,
+            dry_run=dry_run,
+            json_input=json_input,
+            json_output=json_output,
+        )
 
     def to_dict(self) -> dict[str, Any]:
         """Serialise to a plain dict, omitting default-valued optional fields."""
