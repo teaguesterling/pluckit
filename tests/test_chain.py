@@ -328,3 +328,39 @@ class TestChainToArgv:
         assert restored.source == original.source
         assert len(restored.steps) == len(original.steps)
         assert restored.plugins == original.plugins
+
+
+class TestSelectionToChain:
+    def test_single_find(self, eval_repo):
+        from pluckit import Plucker
+        pluck = Plucker(code=str(eval_repo / "src/*.py"))
+        sel = pluck.find(".fn:exported")
+        chain = sel.to_chain()
+        assert len(chain.steps) >= 1
+        assert chain.steps[0].op == "find"
+        assert ".fn:exported" in chain.steps[0].args
+
+    def test_chained_find_filter(self, eval_repo):
+        from pluckit import Plucker
+        pluck = Plucker(code=str(eval_repo / "src/*.py"))
+        sel = pluck.find(".fn").filter(name="greet")
+        chain = sel.to_chain()
+        assert len(chain.steps) == 2
+        assert chain.steps[0].op == "find"
+        assert chain.steps[1].op == "filter"
+
+    def test_to_dict_returns_chain_dict(self, eval_repo):
+        from pluckit import Plucker
+        pluck = Plucker(code=str(eval_repo / "src/*.py"))
+        sel = pluck.find(".fn")
+        d = sel.to_dict()
+        assert "source" in d
+        assert "steps" in d
+
+    def test_to_json_round_trips(self, eval_repo):
+        from pluckit import Plucker
+        pluck = Plucker(code=str(eval_repo / "src/*.py"))
+        sel = pluck.find(".fn:exported")
+        j = sel.to_json()
+        data = json.loads(j)
+        assert data["steps"][0]["op"] == "find"

@@ -68,7 +68,7 @@ class Plucker:
             )
         rel = self._resolve_source(self._code_source, selector)
         from pluckit.selection import Selection
-        return Selection(rel, self._ctx, self._registry)
+        return Selection(rel, self._ctx, self._registry, _op=("find", (selector,), {}))
 
     def source(self, path: str) -> Source:
         """Create a one-off Source for a specific query."""

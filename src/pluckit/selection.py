@@ -650,6 +650,38 @@ class Selection:
         from pluckit.mutations import Remove
         return MutationEngine(self._ctx).apply(self, Remove())
 
+    # ---------------------------------------------------------------
+    # Provenance serialization
+    # ---------------------------------------------------------------
+
+    def to_chain(self):
+        """Extract the chain of operations that produced this selection."""
+        from pluckit.chain import Chain, ChainStep
+
+        steps = []
+        current = self
+        while current is not None:
+            if current._op is not None:
+                op_name, op_args, op_kwargs = current._op
+                steps.append(ChainStep(
+                    op=op_name,
+                    args=[str(a) for a in op_args],
+                    kwargs={str(k): str(v) for k, v in op_kwargs.items()},
+                ))
+            current = current._parent
+
+        steps.reverse()
+        source = [self._ctx.repo] if self._ctx else []
+        return Chain(source=source, steps=steps)
+
+    def to_dict(self):
+        """Serialise provenance chain to a plain dict."""
+        return self.to_chain().to_dict()
+
+    def to_json(self, **kwargs):
+        """Serialise provenance chain to a JSON string."""
+        return self.to_chain().to_json(**kwargs)
+
     # History operations (history, at, diff, blame, authors) live in the
     # History plugin — they depend on duck_tails and git state, not on the
     # core AST query infrastructure. Load `pluckit.plugins.History` to use
