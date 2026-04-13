@@ -561,3 +561,58 @@ class TestViewRelation:
         v = View(blocks)  # no db
         with pytest.raises(PluckerError, match="no database connection"):
             _ = v.relation  # noqa: B018 — property access IS the side effect
+
+
+# ---------------------------------------------------------------------------
+# View serialization round-trips
+# ---------------------------------------------------------------------------
+
+class TestViewSerialization:
+    def test_from_dict_round_trip(self, pluck):
+        from pluckit.plugins.viewer import View
+        view = pluck.view(".fn#top_level_fn")
+        d = view.to_dict()
+        restored = View.from_dict(d)
+        assert len(restored) == len(view)
+        assert restored.markdown == view.markdown
+        assert restored[0].name == view[0].name
+
+    def test_to_json_round_trip(self, pluck):
+        import json
+
+        from pluckit.plugins.viewer import View
+        view = pluck.view(".fn#top_level_fn")
+        j = view.to_json()
+        data = json.loads(j)
+        assert "blocks" in data
+        restored = View.from_json(j)
+        assert restored.markdown == view.markdown
+
+    def test_from_dict_empty_view(self):
+        from pluckit.plugins.viewer import View
+        d = {"query": "", "format": "markdown", "blocks": []}
+        v = View.from_dict(d)
+        assert len(v) == 0
+        assert not v
+
+    def test_from_dict_with_blocks(self):
+        from pluckit.plugins.viewer import View
+        d = {
+            "query": ".fn",
+            "format": "markdown",
+            "blocks": [{
+                "markdown": "```python\ndef foo(): pass\n```",
+                "show": "body",
+                "file_path": "test.py",
+                "start_line": 1,
+                "end_line": 1,
+                "name": "foo",
+                "node_type": "function_definition",
+                "language": "python",
+                "is_aggregate": False,
+            }],
+        }
+        v = View.from_dict(d)
+        assert len(v) == 1
+        assert v[0].name == "foo"
+        assert "def foo" in v.markdown

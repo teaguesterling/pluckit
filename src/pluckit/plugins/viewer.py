@@ -233,6 +233,39 @@ class View:
             ],
         }
 
+    def to_json(self, **kwargs) -> str:
+        """Serialize the view to a JSON string."""
+        import json as _json
+        return _json.dumps(self.to_dict(), **kwargs)
+
+    @classmethod
+    def from_dict(cls, data: dict) -> View:
+        """Reconstruct a View from a :meth:`to_dict` payload."""
+        blocks = []
+        for b in data.get("blocks", []):
+            blocks.append(ViewBlock(
+                markdown=b.get("markdown", ""),
+                rule=None,
+                show=b.get("show", ""),
+                file_path=b.get("file_path"),
+                start_line=b.get("start_line"),
+                end_line=b.get("end_line"),
+                name=b.get("name"),
+                node_type=b.get("node_type"),
+                language=b.get("language"),
+            ))
+        return cls(
+            blocks=blocks,
+            query=data.get("query", ""),
+            format=data.get("format", "markdown"),
+        )
+
+    @classmethod
+    def from_json(cls, text: str) -> View:
+        """Deserialize a View from a JSON string produced by :meth:`to_json`."""
+        import json as _json
+        return cls.from_dict(_json.loads(text))
+
     def __str__(self) -> str:
         return self.markdown
 
