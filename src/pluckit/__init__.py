@@ -5,6 +5,7 @@ from pluckit.plugins.base import Plugin, PluginRegistry
 from pluckit.plugins.history import Commit, History
 from pluckit.plugins.viewer import AstViewer, View, ViewBlock
 from pluckit.selection import Selection
+from pluckit.selector import Selector
 from pluckit.types import DiffResult, InterfaceInfo, NodeInfo, PluckerError
 
 
@@ -60,6 +61,7 @@ __all__ = [
     # Core
     "Plucker",
     "Selection",
+    "Selector",
     "PluckerError",
     # Chain
     "Chain",
