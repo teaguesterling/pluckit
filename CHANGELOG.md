@@ -56,8 +56,50 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   reads is prohibitively expensive. The method raises a
   `PluckerError` pointing at the upstream tracker.
 
+- **Chain serializer/evaluator.** Every pluckit interaction is now a
+  serializable `Chain` — Plucker args plus an ordered list of
+  `ChainStep` operations. Chains can be:
+  - Constructed from CLI args: `pluckit src/**/*.py find ".fn" count`
+  - Parsed from JSON: `pluckit --json '{"source":[...],"steps":[...]}'`
+  - Emitted as JSON: `pluckit --to-json src/**/*.py find ".fn" count`
+  - Built in Python: `Chain(source=["src/**/*.py"], steps=[...])`
+  - Evaluated: `chain.evaluate()` → JSON-serializable result dict
+  - The chain that produced a result is always included in the output
+    under the `"chain"` key for provenance/replay.
+- **Selection stack** — `reset` (or bare `--`) clears the selection
+  context and starts a new `find`. `pop` returns to the previous
+  selection (e.g., from a narrowed `.fn#main` back to the enclosing
+  `.cls` selection).
+- **Project config** — `[tool.pluckit]` section in `pyproject.toml`
+  for default plugins and named source shortcuts:
+  ```toml
+  [tool.pluckit]
+  plugins = ["AstViewer"]
+
+  [tool.pluckit.sources]
+  code = "src/**/*.py"
+  tests = "tests/**/*.py"
+  ```
+  CLI shortcuts: `-c`/`--code`, `-d`/`--docs`, `-t`/`--tests`.
+- **`resolve_plugins()`** — string→class plugin lookup supporting both
+  short names (`"AstViewer"`) and fully-qualified module paths
+  (`"mypackage.plugins:MyPlugin"`).
+
 ### Changed
 
+- **Breaking: CLI rewrite.** The `view` / `find` / `edit` subcommands
+  are removed. Everything is now a chain:
+  ```bash
+  # Old: pluckit view ".fn#main" src/**/*.py
+  # New: pluckit src/**/*.py find ".fn#main" view
+
+  # Old: pluckit find ".fn:exported" --format names src/**/*.py
+  # New: pluckit src/**/*.py find ".fn:exported" names
+
+  # Old: pluckit edit ".fn#foo" --add-param "x: int" src/*.py
+  # New: pluckit src/*.py find ".fn#foo" addParam "x: int"
+  ```
+  `pluckit init` is kept. `--version` and `--help` are kept.
 - Bumped the `duckdb` dependency floor to `>=1.3.2` (required by
   `duck_tails`).
 - **Breaking:** `Plucker.view()` and the module-level `pluckit.view()`

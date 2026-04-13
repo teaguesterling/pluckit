@@ -200,7 +200,7 @@ class View:
             return f"'{_esc(str(v))}'"
 
         value_rows = ", ".join(
-            "(" + ", ".join(_val(v, c) for v, c in zip(r, cols)) + ")"
+            "(" + ", ".join(_val(v, c) for v, c in zip(r, cols, strict=True)) + ")"
             for r in rows
         )
         col_list = ", ".join(cols)
@@ -1112,9 +1112,8 @@ class AstViewer(Plugin):
         return display_path(file_path, plucker._ctx.repo)
 
 
-def _esc(s: str) -> str:
-    """Escape single quotes for SQL string interpolation."""
-    return s.replace("'", "''")
+
+# _esc is imported from pluckit._sql at the top of this file
 
 
 def _escape_table_cell(s: str) -> str:

@@ -560,4 +560,4 @@ class TestViewRelation:
         ]
         v = View(blocks)  # no db
         with pytest.raises(PluckerError, match="no database connection"):
-            v.relation
+            _ = v.relation  # noqa: B018 — property access IS the side effect

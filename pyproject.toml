@@ -101,6 +101,13 @@ exclude = [
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 
+[tool.pluckit]
+plugins = ["AstViewer"]
+
+[tool.pluckit.sources]
+code = "src/**/*.py"
+tests = "tests/**/*.py"
+
 [tool.ruff]
 line-length = 100
 target-version = "py310"
