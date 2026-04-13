@@ -179,6 +179,26 @@ class Chain:
             json_output=json_output,
         )
 
+    def to_argv(self) -> list[str]:
+        """Convert this chain to a CLI token list (inverse of from_argv)."""
+        tokens: list[str] = []
+        for plugin in self.plugins:
+            tokens.extend(["--plugin", plugin])
+        if self.repo:
+            tokens.extend(["--repo", self.repo])
+        if self.dry_run:
+            tokens.append("--dry-run")
+        tokens.extend(self.source)
+        for step in self.steps:
+            if step.op == "reset":
+                tokens.append("--")
+                continue
+            tokens.append(step.op)
+            tokens.extend(step.args)
+            for key, value in step.kwargs.items():
+                tokens.append(f"--{key}={value}")
+        return tokens
+
     def to_dict(self) -> dict[str, Any]:
         """Serialise to a plain dict, omitting default-valued optional fields."""
         d: dict[str, Any] = {

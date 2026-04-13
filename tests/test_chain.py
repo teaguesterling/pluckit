@@ -278,3 +278,53 @@ class TestChainEvaluate:
         serialized = json.dumps(result)
         restored = json.loads(serialized)
         assert restored["type"] == "materialize"
+
+
+class TestChainToArgv:
+    def test_simple_chain(self):
+        chain = Chain(source=["src/**/*.py"], steps=[ChainStep(op="find", args=[".fn"]), ChainStep(op="count")])
+        argv = chain.to_argv()
+        assert argv == ["src/**/*.py", "find", ".fn", "count"]
+
+    def test_chain_with_plugins(self):
+        chain = Chain(source=["src/*.py"], steps=[ChainStep(op="find", args=[".fn"])], plugins=["History"])
+        argv = chain.to_argv()
+        assert "--plugin" in argv
+        assert "History" in argv
+
+    def test_chain_with_repo(self):
+        chain = Chain(source=["*.py"], steps=[ChainStep(op="count")], repo="/tmp/x")
+        argv = chain.to_argv()
+        assert "--repo" in argv
+        assert "/tmp/x" in argv
+
+    def test_chain_with_dry_run(self):
+        chain = Chain(source=["*.py"], steps=[ChainStep(op="count")], dry_run=True)
+        assert "--dry-run" in chain.to_argv()
+
+    def test_chain_with_kwargs_step(self):
+        chain = Chain(source=["*.py"], steps=[
+            ChainStep(op="find", args=[".fn"]),
+            ChainStep(op="filter", kwargs={"name__startswith": "test_"}),
+        ])
+        assert "--name__startswith=test_" in chain.to_argv()
+
+    def test_reset_step_becomes_double_dash(self):
+        chain = Chain(source=["*.py"], steps=[
+            ChainStep(op="find", args=[".fn"]),
+            ChainStep(op="reset"),
+            ChainStep(op="find", args=[".cls"]),
+        ])
+        assert "--" in chain.to_argv()
+
+    def test_round_trip_argv(self):
+        original = Chain(source=["src/**/*.py"], steps=[
+            ChainStep(op="find", args=[".fn:exported"]),
+            ChainStep(op="filter", kwargs={"name__startswith": "validate_"}),
+            ChainStep(op="count"),
+        ], plugins=["AstViewer"])
+        argv = original.to_argv()
+        restored = Chain.from_argv(argv)
+        assert restored.source == original.source
+        assert len(restored.steps) == len(original.steps)
+        assert restored.plugins == original.plugins
