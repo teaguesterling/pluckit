@@ -24,7 +24,7 @@ from __future__ import annotations
 
 import shutil
 import subprocess
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from typing import TYPE_CHECKING, Any
 
 from pluckit.plugins.base import Plugin
@@ -42,6 +42,24 @@ class Commit:
     author_email: str
     author_date: str     # ISO 8601 string
     message: str         # first line of the commit message
+
+    # -- Serialization (for MCP transport) ----------------------------------
+
+    def to_dict(self) -> dict[str, str]:
+        return asdict(self)
+
+    @classmethod
+    def from_dict(cls, data: dict[str, str]) -> Commit:
+        return cls(**{k: data[k] for k in ("hash", "author_name", "author_email", "author_date", "message")})
+
+    def to_json(self, **kwargs) -> str:
+        import json as _json
+        return _json.dumps(self.to_dict(), **kwargs)
+
+    @classmethod
+    def from_json(cls, text: str) -> Commit:
+        import json as _json
+        return cls.from_dict(_json.loads(text))
 
 
 class History(Plugin):
