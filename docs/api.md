@@ -246,6 +246,141 @@ per-node blocks from aggregates.
 
 ---
 
+## Chain
+
+The `Chain` class is the programmatic equivalent of the CLI's chain
+syntax. It represents a source, a list of steps, and optional plugin
+configuration. Chains can be built from Python dicts, JSON strings, or
+parsed directly from `sys.argv`-style token lists.
+
+### `ChainStep`
+
+A single operation in a chain:
+
+```python
+from pluckit.chain import ChainStep
+
+step = ChainStep(op="find", args=[".fn:exported"])
+step = ChainStep(op="filter", kwargs={"min_lines": 10})
+step = ChainStep(op="count")
+```
+
+| Field    | Type          | Description                              |
+|----------|---------------|------------------------------------------|
+| `op`     | `str`         | Operation name (e.g. `find`, `count`)    |
+| `args`   | `list[str]`   | Positional arguments (default: `[]`)     |
+| `kwargs` | `dict`        | Keyword arguments (default: `{}`)        |
+
+### `Chain`
+
+```python
+from pluckit.chain import Chain, ChainStep
+
+chain = Chain(
+    source=["src/**/*.py"],
+    steps=[
+        ChainStep(op="find", args=[".fn:exported"]),
+        ChainStep(op="count"),
+    ],
+    plugins=["AstViewer"],
+)
+```
+
+| Field     | Type              | Description                              |
+|-----------|-------------------|------------------------------------------|
+| `source`  | `list[str]`       | File paths or glob patterns              |
+| `steps`   | `list[ChainStep]` | Ordered list of operations               |
+| `plugins` | `list[str]`       | Plugin names to load (default: `[]`)     |
+
+### Construction methods
+
+#### `Chain.from_dict(data: dict) -> Chain`
+
+Build a chain from a dictionary (the same structure as the JSON I/O
+format described in the [CLI reference](cli.md#json-io)):
+
+```python
+chain = Chain.from_dict({
+    "source": ["src/**/*.py"],
+    "steps": [
+        {"op": "find", "args": [".fn:exported"]},
+        {"op": "count"},
+    ],
+})
+```
+
+#### `Chain.from_json(json_string: str) -> Chain`
+
+Parse a JSON string into a chain:
+
+```python
+chain = Chain.from_json('{"source": ["src/**/*.py"], "steps": [{"op": "find", "args": [".fn:exported"]}, {"op": "count"}]}')
+```
+
+#### `Chain.from_argv(tokens: list[str]) -> Chain`
+
+Parse a CLI-style token list into a chain. This is the same parsing
+the CLI entry point uses:
+
+```python
+chain = Chain.from_argv(["src/**/*.py", "find", ".fn:exported", "count"])
+```
+
+### Execution
+
+#### `chain.evaluate() -> Any`
+
+Run the chain and return the result. The return type depends on the
+terminal operation: `int` for `count`, `list[str]` for `names`, and
+so on.
+
+```python
+chain = Chain.from_argv(["src/**/*.py", "find", ".fn:exported", "count"])
+result = chain.evaluate()
+print(result)  # e.g. 42
+```
+
+### Serialization
+
+#### `chain.to_dict() -> dict`
+
+Convert the chain to a JSON-serializable dictionary:
+
+```python
+data = chain.to_dict()
+# {"source": ["src/**/*.py"], "plugins": [], "steps": [{"op": "find", "args": [".fn:exported"]}, {"op": "count"}]}
+```
+
+#### `chain.to_json() -> str`
+
+Serialize the chain as a JSON string:
+
+```python
+json_str = chain.to_json()
+```
+
+### Round-trip example
+
+```python
+from pluckit.chain import Chain
+
+# Build from CLI tokens
+chain = Chain.from_argv(["src/**/*.py", "find", ".fn:exported", "names"])
+
+# Inspect as JSON
+print(chain.to_json())
+
+# Reconstruct from the dict form
+chain2 = Chain.from_dict(chain.to_dict())
+
+# Execute
+result = chain2.evaluate()
+for name in result:
+    print(name)
+```
+
+---
+
 ## Plugins
 
 pluckit is composable. Core capabilities live on `Selection`; anything

@@ -1,21 +1,175 @@
 # CLI Reference
 
-pluckit exposes four subcommands: `init`, `view`, `find`, and `edit`. They
-all share one entry point:
+pluckit uses a **chain-based** CLI where a source comes first, followed
+by one or more operation steps. There are no subcommands for querying,
+viewing, or editing — everything is expressed as a chain of steps.
 
 ```bash
-pluckit [--version] [-h] COMMAND [OPTIONS] ...
+pluckit [FLAGS] SOURCE STEP [STEP...] [-- STEP...]
+pluckit --json JSON_STRING
+pluckit init [--force-reinstall] [--quiet]
 ```
 
-Run `pluckit COMMAND --help` for command-specific options.
+Run `pluckit --help` for a summary of flags and operations.
+
+---
+
+## Sources
+
+The first positional argument is the **source** — a file path, glob
+pattern, or a named shortcut:
+
+```bash
+# Glob pattern
+pluckit "src/**/*.py" find ".fn:exported" names
+
+# Explicit file
+pluckit src/auth.py find ".fn#validate_token" text
+
+# Named shortcuts
+pluckit -c find ".fn:exported" count      # --code
+pluckit -d find ".cls" names              # --docs
+pluckit -t find ".fn[name^=test_]" names  # --tests
+```
+
+Shortcuts (`-c`/`--code`, `-d`/`--docs`, `-t`/`--tests`) resolve via
+the `[tool.pluckit.sources]` table in `pyproject.toml`. See
+[Configuration](#configuration) below.
+
+---
+
+## Steps
+
+After the source, every token is part of a **step chain**. Each
+recognized operation name starts a new step. Positional tokens between
+operation names are arguments to that step. `--key=value` tokens become
+keyword arguments.
+
+```bash
+pluckit src/**/*.py find ".fn:exported" filter --min-lines=10 text
+#       ^^^^^^^^^^^ ^^^^ ^^^^^^^^^^^^^^ ^^^^^^ ^^^^^^^^^^^^^^^ ^^^^
+#       source      op   arg            op     kwarg           op
+```
+
+A bare `--` is equivalent to the `reset` operation — it clears the
+current selection and starts a new find context:
+
+```bash
+pluckit src/**/*.py find ".fn#foo" rename "bar" -- find ".call#foo" replace "foo" "bar"
+```
+
+### Query operations
+
+| Operation        | Arguments          | Description                            |
+|------------------|--------------------|----------------------------------------|
+| `find`           | `SELECTOR`         | Select nodes matching a CSS selector   |
+| `filter`         | `[--kwargs]`       | Narrow the current selection           |
+| `not_`           |                    | Invert the current selection           |
+
+### Navigation operations
+
+| Operation        | Arguments          | Description                            |
+|------------------|--------------------|----------------------------------------|
+| `parent`         |                    | Move to parent nodes                   |
+| `children`       |                    | Move to direct children                |
+| `siblings`       |                    | Nodes sharing a parent                 |
+| `ancestor`       |                    | Walk up the AST                        |
+| `next`           |                    | Next sibling                           |
+| `prev`           |                    | Previous sibling                       |
+| `containing`     | `TEXT`             | Nodes whose source contains text       |
+| `at_line`        | `N`                | Node at a specific line number         |
+| `at_lines`       | `START END`        | Nodes within a line range              |
+
+### Terminal operations
+
+| Operation        | Arguments          | Description                            |
+|------------------|--------------------|----------------------------------------|
+| `count`          |                    | Print the number of matches            |
+| `names`          |                    | Print one identifier name per line     |
+| `text`           |                    | Print the source text of each match    |
+| `attr`           | `NAME`             | Print a named attribute of each match  |
+| `complexity`     |                    | Print cyclomatic complexity            |
+| `materialize`    |                    | Print matches as JSON                  |
+
+### Mutation operations
+
+| Operation        | Arguments          | Description                            |
+|------------------|--------------------|----------------------------------------|
+| `addParam`       | `PARAM`            | Add a parameter to matched functions   |
+| `removeParam`    | `NAME`             | Remove a parameter by name             |
+| `addArg`         | `EXPR`             | Add an argument to matched calls       |
+| `removeArg`      | `NAME`             | Remove a keyword argument by name      |
+| `rename`         | `NEW`              | Rename the matched definition          |
+| `prepend`        | `TEXT`             | Prepend lines to the body              |
+| `append`         | `TEXT`             | Append lines to the body               |
+| `insertBefore`   | `ANCHOR CODE`      | Insert code before an anchor selector  |
+| `insertAfter`    | `ANCHOR CODE`      | Insert code after an anchor selector   |
+| `wrap`           | `BEFORE AFTER`     | Wrap the matched node                  |
+| `unwrap`         |                    | Remove enclosing context               |
+| `remove`         |                    | Delete the matched node                |
+| `clearBody`      |                    | Replace body with `pass` / `{}`        |
+| `replaceWith`    | `TEXT`             | Replace the entire matched node        |
+| `replace`        | `OLD NEW`          | String-level replace within the node   |
+
+### Plugin operations
+
+| Operation        | Arguments          | Description                            |
+|------------------|--------------------|----------------------------------------|
+| `view`           | `[QUERY]`          | Render matched nodes as markdown       |
+| `history`        |                    | Show git history for matched nodes     |
+| `authors`        |                    | List distinct commit authors           |
+| `at`             | `REV`              | Show the node at a historical revision |
+| `diff`           | `REV`              | Unified diff against a revision        |
+| `blame`          |                    | Annotate matched nodes with blame info |
+
+### Control operations
+
+| Operation        | Arguments          | Description                            |
+|------------------|--------------------|----------------------------------------|
+| `reset`          |                    | Clear selection, start fresh (same as bare `--`) |
+| `pop`            |                    | Return to the previous selection       |
+
+---
+
+## Global Flags
+
+| Flag                  | Description                                           |
+|-----------------------|-------------------------------------------------------|
+| `--plugin NAME`       | Load a named plugin                                   |
+| `--repo DIR`          | Repository root for relative paths (default: cwd)     |
+| `--dry-run`, `-n`     | Show what would change without writing                 |
+| `--json JSON`         | Run a chain from a JSON string (see [JSON I/O](#json-io)) |
+| `--to-json`           | Print the chain as JSON instead of executing it        |
+| `--version`           | Print version and exit                                 |
+| `-h`, `--help`        | Print help and exit                                    |
+
+---
+
+## Result Formatting
+
+The terminal operation you choose determines the output format:
+
+| Terminal       | Output                                                  |
+|----------------|---------------------------------------------------------|
+| `count`        | A single number on stdout                               |
+| `names`        | One identifier name per line                            |
+| `text`         | Source text of each matched node, separated by newlines  |
+| `view`         | Rendered markdown (requires `AstViewer` plugin)         |
+| `materialize`  | JSON array of matched nodes                             |
+| mutations      | A summary line printed to stderr                        |
+
+When `--dry-run` is active, mutation operations print a unified diff to
+stdout and a summary to stderr. Pipe the diff into `patch` or
+`git apply` to stage changes manually.
 
 ---
 
 ## `pluckit init`
 
-Eagerly install and verify the DuckDB community extensions pluckit depends
-on. This happens lazily on first use of any other command, but running it
-explicitly gives you clearer diagnostics if anything fails.
+The only named subcommand. Eagerly installs and verifies the DuckDB
+community extensions pluckit depends on. This happens lazily on first
+use of any other command, but running it explicitly gives clearer
+diagnostics if anything fails.
 
 ```bash
 pluckit init [--force-reinstall] [--quiet]
@@ -47,266 +201,171 @@ pluckit init: all extensions ready.
 
 ---
 
-## `pluckit view`
+## JSON I/O
 
-Render matched code regions as markdown using a CSS-style viewer query.
-The query can be provided as a positional argument, via `--query-file`, or
-read from stdin with `-`.
+Chains can be expressed as JSON for programmatic use — pass them via
+`--json` on the command line or pipe them to tools that generate
+pluckit invocations.
+
+```json
+{
+  "source": ["src/**/*.py"],
+  "plugins": ["AstViewer"],
+  "steps": [
+    {"op": "find", "args": [".fn:exported"]},
+    {"op": "count"}
+  ]
+}
+```
 
 ```bash
-pluckit view QUERY [PATHS...] [OPTIONS]
-pluckit view --query-file FILE [PATHS...] [OPTIONS]
-pluckit view - [PATHS...] [OPTIONS]    # read query from stdin
+# From the command line
+pluckit --json '{"source": ["src/**/*.py"], "steps": [{"op": "find", "args": [".fn:exported"]}, {"op": "count"}]}'
+
+# Inspect what a CLI invocation would look like as JSON
+pluckit --to-json src/**/*.py find ".fn:exported" count
 ```
 
-### Options
+Each step object has:
 
-| Flag                 | Description                                            |
-|----------------------|--------------------------------------------------------|
-| `-q, --query-file`   | Read query from file instead of positional argument    |
-| `-f, --format`       | Output format (default: `markdown`)                    |
-| `-o, --output`       | Write output to file (default: stdout)                 |
-| `-r, --repo`         | Repository root for relative paths (default: cwd)      |
+| Field    | Type          | Description                              |
+|----------|---------------|------------------------------------------|
+| `op`     | `str`         | Operation name (e.g. `find`, `count`)    |
+| `args`   | `list[str]`   | Positional arguments (optional)          |
+| `kwargs` | `dict`        | Keyword arguments (optional)             |
 
-### Examples
+Top-level fields:
 
-```bash
-# Show the full body of a function
-pluckit view ".fn#parse_chain" training/chain_parser.py
-
-# Just the signature
-pluckit view ".fn#parse_chain { show: signature; }" training/chain_parser.py
-
-# First 10 lines
-pluckit view ".fn#parse_chain { show: 10; }" training/chain_parser.py
-
-# Class outline — header + method signatures
-pluckit view ".cls#ChainSampler" training/chain_sampler.py
-
-# Multi-rule query (CSS-stylesheet style)
-pluckit view ".fn { show: signature; } #main { show: body; }" training/generate.py
-
-# Query from stdin
-echo ".fn[name^=test_] { show: signature; }" | pluckit view - tests/*.py
-
-# Query from a file
-pluckit view --query-file audit.q src/**/*.py
-
-# Multiple paths and glob patterns
-pluckit view ".fn#parse" src/*.py lib/*.py
-```
-
-### Multi-match collapse
-
-When a signature-mode query matches more than one function, the output
-collapses into a markdown table instead of N code fences:
-
-```
-| File               | Lines   | Signature                                  |
-|---|---|---|
-| src/validate.py    | 35-54   | `def _is_garbled(intent: str) -> bool:`    |
-| src/validate.py    | 73-88   | `def _flatten_ops(comp: Any) -> list[str]:`|
-| src/validate.py    | 102-196 | `def validate_chain(chain: str) -> Result:`|
-```
-
-For the full `{ show: ... }` declaration language, see
-[Selector & Declaration Language](selectors.md).
+| Field     | Type          | Description                              |
+|-----------|---------------|------------------------------------------|
+| `source`  | `list[str]`   | File paths or glob patterns              |
+| `plugins` | `list[str]`   | Plugin names to load (optional)          |
+| `steps`   | `list[step]`  | Ordered list of step objects             |
 
 ---
 
-## `pluckit find`
+## Configuration
 
-List AST nodes matching a CSS selector. Output formats are designed for
-scripting and agent discovery: terse file:line pairs by default, or a
-signature table, or machine-readable JSON.
+pluckit reads configuration from the `[tool.pluckit]` table in
+`pyproject.toml`:
 
-```bash
-pluckit find SELECTOR PATHS... [OPTIONS]
+```toml
+[tool.pluckit]
+plugins = ["AstViewer"]
+
+[tool.pluckit.sources]
+code = ["src/**/*.py"]
+docs = ["docs/**/*.md"]
+tests = ["tests/**/*.py"]
 ```
 
-### Options
-
-| Flag                                             | Description                                       |
-|--------------------------------------------------|---------------------------------------------------|
-| `-f, --format {locations,names,signature,json}`  | Output format (default: `locations`)              |
-| `-o, --output`                                   | Write output to file (default: stdout)            |
-| `-r, --repo`                                     | Repository root for relative paths                |
-| `--count`                                        | Print only the total number of matches            |
-
-### Output formats
-
-#### `locations` (default)
-
-One line per match, formatted `path:line:name`. Designed for shell
-pipelines:
-
-```bash
-$ pluckit find ".fn:exported" src/auth.py
-src/auth.py:14:authenticate
-src/auth.py:42:decode_jwt
-src/auth.py:89:refresh_token
-```
-
-#### `names`
-
-Deduplicated list of identifier names. Good for set operations:
-
-```bash
-$ pluckit find ".fn[name^=test_]" --format names tests/*.py | wc -l
-218
-```
-
-#### `signature`
-
-Markdown table with synthesized signatures. Use this for code review and
-audits:
-
-```bash
-$ pluckit find ".fn:exported" --format signature src/auth.py
-| File        | Lines   | Signature                               |
-|---|---|---|
-| src/auth.py | 14-31   | `def authenticate(username, password):` |
-| src/auth.py | 42-66   | `def decode_jwt(token: str) -> dict:`   |
-```
-
-#### `json`
-
-One JSON object per match:
-
-```bash
-$ pluckit find ".cls" --format json src/models.py
-{"file": "src/models.py", "start_line": 8, "end_line": 42, "name": "User", "type": "class_definition", "language": "python"}
-{"file": "src/models.py", "start_line": 45, "end_line": 89, "name": "Session", "type": "class_definition", "language": "python"}
-```
-
-### Example: counting
-
-```bash
-$ pluckit find ".fn" --count src/**/*.py
-147
-```
+The `plugins` list names plugins to load by default. The
+`[tool.pluckit.sources]` table defines named shortcuts that the `-c`,
+`-d`, and `-t` flags (and any custom names) resolve against.
 
 ---
 
-## `pluckit edit`
-
-Apply structural mutations to matched nodes. All edits are
-**transactional**: if any affected file fails syntax re-validation after
-splicing, every file is rolled back to its pre-edit state.
+## Examples
 
 ```bash
-pluckit edit [GLOBAL_FLAGS] SELECTOR OPERATION [OPERATION...]
-             [-- SELECTOR OPERATION [OPERATION...] [-- ...]]
-             PATHS...
-```
+# Count all exported functions
+pluckit src/**/*.py find ".fn:exported" count
 
-### Global flags
+# List function names in a file
+pluckit src/auth.py find ".fn" names
 
-| Flag             | Description                                              |
-|------------------|----------------------------------------------------------|
-| `--dry-run`, `-n`| Show a unified diff of what would change; don't write    |
-| `--repo`, `-r`   | Repository root for relative paths                       |
+# View a specific function as markdown
+pluckit src/auth.py find ".fn#validate_token" view
 
-### Operations
+# Dry-run a rename
+pluckit -n src/*.py find ".fn#old_name" rename "new_name"
 
-| Flag                          | Args   | Description                                                  |
-|-------------------------------|--------|--------------------------------------------------------------|
-| `--replace-with`              | `TEXT` | Replace the matched node's entire text                       |
-| `--replace`                   | `2`    | String-level replace within the matched node                 |
-| `--prepend-lines`, `--prepend`| `TEXT` | Insert lines at the top of the matched node's body           |
-| `--append-lines`, `--append`  | `TEXT` | Insert lines at the bottom of the matched node's body        |
-| `--insert-lines`              | `3`    | `POSITION SELECTOR TEXT` — insert relative to a child anchor |
-| `--wrap`                      | `2`    | Wrap the matched node with `BEFORE` and `AFTER`              |
-| `--unwrap`                    | `0`    | Remove the matched node's enclosing context (inverse of wrap)|
-| `--add-param`                 | `NAME` | Add a parameter to every matched function/method             |
-| `--remove-param`              | `NAME` | Remove a parameter by name                                   |
-| `--add-arg`                   | `EXPR` | Add an argument to every matched call site                   |
-| `--remove-arg`                | `NAME` | Remove a keyword argument by name                            |
-| `--rename`                    | `NAME` | Rename the matched definition (first name occurrence)        |
-| `--clear-body`                | `0`    | Replace the body with `pass` (Python) or `{}` (C-family)     |
-| `--remove`                    | `0`    | Remove the matched node entirely                             |
+# Chain multiple operations with reset
+pluckit src/**/*.py find ".fn#foo" rename "bar" -- find ".call#foo" replace "foo" "bar"
 
-### Chainable edits
+# Navigate: find classes then their methods
+pluckit src/**/*.py find ".cls:exported" children names
 
-A single `pluckit edit` invocation can apply **multiple operations** to
-one selector, or run **multiple groups** in order. Groups are separated by
-a bare `--`:
-
-```bash
-pluckit edit \
-    ".cls#Foo .fn#__init__" --add-param "foo: int = 30" \
-                            --append-lines "self.foo = foo" \
-    -- \
-    ".call#Foo"             --add-arg "foo=10" \
-    src/**/*.py
-```
-
-That single command:
-
-1. Finds every `__init__` inside class `Foo`, adds the parameter, and
-   appends `self.foo = foo` to the body.
-2. Finds every call to `Foo(...)` and adds `foo=10` as a keyword
-   argument.
-3. Validates every affected file parses cleanly.
-4. Rolls back *all* changes if any of them fails.
-
-### Dry-run
-
-`--dry-run` prints a real unified diff to stdout (one per changed file)
-and a summary line to stderr:
-
-```bash
-$ pluckit edit --dry-run ".fn#top_level_fn" --rename renamed src/sample.py
---- a/src/sample.py
-+++ b/src/sample.py
-@@ -1,4 +1,4 @@
--def top_level_fn(x):
-+def renamed(x):
-     """Top-level function."""
-     return x * 2
-
-[dry-run] 1 group(s), 1 total match(es)
-```
-
-Pipe the diff directly into `patch` or `git apply` if you want to stage
-it manually instead of letting pluckit write.
-
-### Examples
-
-```bash
-# Replace a function's body entirely
-pluckit edit ".fn#foo" --replace-with "def foo():\n    return 1" src/*.py
-
-# Scoped find-and-replace within matched nodes
-pluckit edit ".fn#validate" --replace "return None" "raise ValueError()" src/*.py
+# Use a named source shortcut
+pluckit -c find ".fn:exported" count
 
 # Add a parameter to every exported function
-pluckit edit ".fn:exported" --add-param "timeout: int = 30" src/**/*.py
+pluckit src/**/*.py find ".fn:exported" addParam "timeout: int = 30"
 
-# Remove a function entirely
-pluckit edit ".fn#deprecated_helper" --remove src/*.py
+# Get the source text of a function at a historical revision
+pluckit src/auth.py find ".fn#validate_token" at v0.1.0
 
-# Clear a function body to `pass` / `{}`
-pluckit edit ".fn#todo_later" --clear-body src/*.py
+# View complexity of matched functions
+pluckit src/**/*.py find ".fn" complexity
 
-# Insert lines relative to a child anchor
-pluckit edit ".cls#Foo" --insert-lines before ".fn#bar" "def pre_bar(self): pass" src/*.py
-pluckit edit ".fn#main"  --insert-lines after  ".ret"    "cleanup()"                src/*.py
-
-# Wrap a call in a try/except
-pluckit edit ".call#query" --wrap "try:" "except DatabaseError:\n    raise" src/*.py
+# JSON round-trip
+pluckit --to-json src/**/*.py find ".fn:exported" count | pluckit --json "$(cat -)"
 ```
 
-### Line-level vs character-level edits
+---
 
-| Operation            | Granularity | Preserves surrounding text? |
-|----------------------|-------------|------------------------------|
-| `--prepend-lines`    | line        | yes (inserts whole new lines)|
-| `--append-lines`     | line        | yes                          |
-| `--insert-lines`     | line        | yes                          |
-| `--replace` (2-arg)  | character   | yes (within matched node)    |
-| `--replace-with`     | node        | no (replaces entire node)    |
-| `--wrap`             | node        | yes (adds lines before/after)|
+## Migration Guide
 
-Character-level insertion at arbitrary positions (`--insert-chars`) is
-reserved for v0.2 once sitting_duck exposes byte offsets.
+The old CLI had separate `view`, `find`, and `edit` subcommands. These
+are gone. Everything is now a chain where the source comes first,
+followed by operations.
+
+### `view` subcommand
+
+```bash
+# Old
+pluckit view ".fn#main" src/**/*.py
+pluckit view ".fn#main { show: signature; }" src/**/*.py
+
+# New
+pluckit src/**/*.py find ".fn#main" view
+pluckit src/**/*.py find ".fn#main" view ".fn#main { show: signature; }"
+```
+
+### `find` subcommand
+
+```bash
+# Old
+pluckit find ".fn:exported" --format names src/**/*.py
+pluckit find ".fn:exported" --count src/**/*.py
+pluckit find ".cls" --format json src/models.py
+
+# New
+pluckit src/**/*.py find ".fn:exported" names
+pluckit src/**/*.py find ".fn:exported" count
+pluckit src/models.py find ".cls" materialize
+```
+
+### `edit` subcommand
+
+```bash
+# Old
+pluckit edit ".fn#foo" --add-param "x: int" src/*.py
+pluckit edit ".fn#deprecated_helper" --remove src/*.py
+pluckit edit --dry-run ".fn#top_level_fn" --rename renamed src/sample.py
+pluckit edit ".cls#Foo .fn#__init__" --add-param "foo: int = 30" \
+                                     --append-lines "self.foo = foo" \
+    -- ".call#Foo" --add-arg "foo=10" src/**/*.py
+
+# New
+pluckit src/*.py find ".fn#foo" addParam "x: int"
+pluckit src/*.py find ".fn#deprecated_helper" remove
+pluckit -n src/sample.py find ".fn#top_level_fn" rename "renamed"
+pluckit src/**/*.py find ".cls#Foo .fn#__init__" addParam "foo: int = 30" \
+    append "self.foo = foo" -- find ".call#Foo" addArg "foo=10"
+```
+
+### Key differences
+
+| Old CLI                    | New CLI                                    |
+|----------------------------|--------------------------------------------|
+| `pluckit view QUERY PATHS` | `pluckit PATHS find SELECTOR view`         |
+| `pluckit find SEL PATHS`   | `pluckit PATHS find SEL terminal`          |
+| `pluckit edit SEL --op PATHS` | `pluckit PATHS find SEL op`             |
+| `--format names`           | `names` (terminal operation)               |
+| `--format json`            | `materialize` (terminal operation)         |
+| `--count`                  | `count` (terminal operation)               |
+| `--add-param`              | `addParam` (mutation operation)            |
+| `--remove`                 | `remove` (mutation operation)              |
+| `-- SELECTOR --op`         | `-- find SELECTOR op` or `reset find ...`  |
+| Paths at the end           | Source at the beginning                    |
