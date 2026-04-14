@@ -111,6 +111,106 @@ class Plucker:
 
         raise AttributeError(f"Plucker has no method {name!r}")
 
+    def to_dict(self) -> dict:
+        """Serialize constructor args (not the live connection)."""
+        import os
+
+        d: dict = {}
+        if self._code_source:
+            d["code"] = self._code_source
+        # Extract unique plugin names from registered plugins
+        plugin_names: list[str] = []
+        seen: set[int] = set()
+        for (plugin, _method_name) in self._registry.methods.values():
+            if id(plugin) in seen:
+                continue
+            seen.add(id(plugin))
+            name = getattr(plugin, "name", None) or type(plugin).__name__
+            if name and name not in plugin_names:
+                plugin_names.append(name)
+        if plugin_names:
+            d["plugins"] = plugin_names
+        if self._ctx.repo and self._ctx.repo != os.getcwd():
+            d["repo"] = self._ctx.repo
+        return d
+
+    @classmethod
+    def from_dict(cls, data: dict) -> Plucker:
+        """Reconstruct a Plucker from a serialized dict."""
+        from pluckit.plugins.base import resolve_plugins
+
+        plugin_classes = resolve_plugins(data.get("plugins", []))
+        return cls(
+            code=data.get("code"),
+            plugins=plugin_classes,
+            repo=data.get("repo"),
+        )
+
+    def to_json(self, **kwargs) -> str:
+        """Serialize to a JSON string."""
+        import json as _json
+
+        return _json.dumps(self.to_dict(), **kwargs)
+
+    @classmethod
+    def from_json(cls, text: str) -> Plucker:
+        """Reconstruct a Plucker from a JSON string."""
+        import json as _json
+
+        return cls.from_dict(_json.loads(text))
+
+    def to_argv(self) -> list[str]:
+        """Convert to CLI argument tokens."""
+        tokens: list[str] = []
+        d = self.to_dict()
+        for p in d.get("plugins", []):
+            tokens.extend(["--plugin", p])
+        if d.get("repo"):
+            tokens.extend(["--repo", d["repo"]])
+        if d.get("code"):
+            tokens.append(d["code"])
+        return tokens
+
+    @classmethod
+    def from_argv(cls, tokens: list[str]) -> Plucker:
+        """Parse Plucker constructor args from CLI tokens.
+
+        Consumes --plugin/--repo flags and a source positional; ignores
+        any step-name tokens that might follow.
+        """
+        from pluckit.plugins.base import resolve_plugins
+
+        plugins: list[str] = []
+        repo: str | None = None
+        code: str | None = None
+        i = 0
+        n = len(tokens)
+        while i < n:
+            tok = tokens[i]
+            if tok in ("--plugin", "-p"):
+                if i + 1 < n:
+                    plugins.append(tokens[i + 1])
+                    i += 2
+                    continue
+                i += 1
+                continue
+            if tok in ("--repo", "-r"):
+                if i + 1 < n:
+                    repo = tokens[i + 1]
+                    i += 2
+                    continue
+                i += 1
+                continue
+            # First non-flag token is the source
+            if not tok.startswith("-") and code is None:
+                code = tok
+            i += 1
+        return cls(
+            code=code,
+            plugins=resolve_plugins(plugins),
+            repo=repo,
+        )
+
     def _resolve_source(self, source: str, selector: str):
         """Resolve source string to a DuckDB relation.
 
