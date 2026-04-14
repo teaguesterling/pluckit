@@ -2,6 +2,7 @@
 from pluckit.cache import ASTCache
 from pluckit.chain import Chain, ChainStep
 from pluckit.config import PluckitConfig
+from pluckit.isolated import Isolated
 from pluckit.plucker import Plucker
 from pluckit.pluckins.base import Pluckin, PluckinRegistry, Plugin, PluginRegistry
 from pluckit.pluckins.calls import Calls
@@ -90,6 +91,7 @@ __all__ = [
     "NodeInfo",
     "DiffResult",
     "InterfaceInfo",
+    "Isolated",
     # Module-level shortcuts
     "view",
     "find",

@@ -651,6 +651,20 @@ class Selection:
         return MutationEngine(self._ctx).apply(self, Remove())
 
     # ---------------------------------------------------------------
+    # Extraction — scope-aware block isolation
+    # ---------------------------------------------------------------
+
+    def isolate(self):
+        """Extract this selection as a standalone block with its dependencies.
+
+        Returns a :class:`pluckit.isolated.Isolated` describing the block's
+        body text, free-variable parameters, required imports, and builtin
+        names it references.
+        """
+        from pluckit.isolated import isolate_selection
+        return isolate_selection(self)
+
+    # ---------------------------------------------------------------
     # Provenance serialization
     # ---------------------------------------------------------------
 

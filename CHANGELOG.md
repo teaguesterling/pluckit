@@ -6,6 +6,18 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- **`Isolated` type** — new terminal on `Selection` via `.isolate()` that
+  extracts a block of code (e.g., a function body, a line range) as a
+  standalone unit. It identifies free variables read by the block but
+  defined outside it, classifies each as Python builtin / imported
+  symbol / free parameter, and can render the result as a standalone
+  function (`.as_function()`) or a Jupyter cell (`.as_jupyter_cell()`).
+  Supports `to_dict` / `from_dict` / `to_json` / `from_json` for
+  transport. Useful for extracting runnable snippets that an agent or
+  user can paste into a notebook or test.
+
 ## [0.9.0] — 2026-04-14
 
 Brand-consistency rename for the plugin system. Plugin authors should
