@@ -3,11 +3,11 @@ from pluckit.cache import ASTCache
 from pluckit.chain import Chain, ChainStep
 from pluckit.config import PluckitConfig
 from pluckit.plucker import Plucker
-from pluckit.plugins.base import Pluckin, PluckinRegistry, Plugin, PluginRegistry
-from pluckit.plugins.calls import Calls
-from pluckit.plugins.history import Commit, History
-from pluckit.plugins.scope import Scope
-from pluckit.plugins.viewer import AstViewer, View, ViewBlock
+from pluckit.pluckins.base import Pluckin, PluckinRegistry, Plugin, PluginRegistry
+from pluckit.pluckins.calls import Calls
+from pluckit.pluckins.history import Commit, History
+from pluckit.pluckins.scope import Scope
+from pluckit.pluckins.viewer import AstViewer, View, ViewBlock
 from pluckit.selection import Selection
 from pluckit.selector import Selector
 from pluckit.types import DiffResult, InterfaceInfo, NodeInfo, PluckerError

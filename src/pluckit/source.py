@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from pluckit._context import _Context as Context
-    from pluckit.plugins.base import PluckinRegistry
+    from pluckit.pluckins.base import PluckinRegistry
     from pluckit.selection import Selection
 
 

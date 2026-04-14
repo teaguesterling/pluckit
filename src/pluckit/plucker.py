@@ -4,13 +4,13 @@ from typing import TYPE_CHECKING
 
 from pluckit._context import _Context
 from pluckit._sql import _esc, _selector_to_where, ast_select_sql
-from pluckit.plugins.base import Pluckin, PluckinRegistry
+from pluckit.pluckins.base import Pluckin, PluckinRegistry
 from pluckit.types import PluckerError
 
 if TYPE_CHECKING:
     import duckdb
 
-    from pluckit.plugins.viewer import View
+    from pluckit.pluckins.viewer import View
     from pluckit.selection import Selection
     from pluckit.source import Source
 
@@ -100,7 +100,7 @@ class Plucker:
 
         Requires the AstViewer plugin to be registered. Convenience wrapper
         that delegates to the plugin if present. Returns a :class:`View`
-        object — see ``pluckit.plugins.viewer.View`` for the full surface.
+        object — see ``pluckit.pluckins.viewer.View`` for the full surface.
         """
         if "view" not in self._registry.methods:
             raise PluckerError(
@@ -157,7 +157,7 @@ class Plucker:
     @classmethod
     def from_dict(cls, data: dict) -> Plucker:
         """Reconstruct a Plucker from a serialized dict."""
-        from pluckit.plugins.base import resolve_plugins
+        from pluckit.pluckins.base import resolve_plugins
 
         plugin_classes = resolve_plugins(data.get("plugins", []))
         return cls(
@@ -198,7 +198,7 @@ class Plucker:
         Consumes --plugin/--repo flags and a source positional; ignores
         any step-name tokens that might follow.
         """
-        from pluckit.plugins.base import resolve_plugins
+        from pluckit.pluckins.base import resolve_plugins
 
         plugins: list[str] = []
         repo: str | None = None

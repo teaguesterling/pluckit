@@ -27,7 +27,7 @@ import subprocess
 from dataclasses import asdict, dataclass
 from typing import TYPE_CHECKING, Any
 
-from pluckit.plugins.base import Pluckin
+from pluckit.pluckins.base import Pluckin
 from pluckit.types import PluckerError
 
 if TYPE_CHECKING:
@@ -68,7 +68,7 @@ class History(Pluckin):
     Example::
 
         from pluckit import Plucker
-        from pluckit.plugins import History
+        from pluckit.pluckins import History
 
         pluck = Plucker(code="src/**/*.py", plugins=[History])
         fn = pluck.find(".fn#validate_token")

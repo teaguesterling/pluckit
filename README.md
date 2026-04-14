@@ -308,7 +308,7 @@ See `training/README.md` for generation and formatting.
         │                       query, filter, navigate, read, mutate
         ├── pluckit._sql        selector → SQL WHERE fragments
         │
-   pluckit.plugins              optional capabilities
+   pluckit.pluckins             optional capabilities
         ├── AstViewer           CSS-style viewer with `show:` declarations
         ├── Calls (v0.2)        call graph via name-join + plugin upgrades
         ├── History (v0.2)      git history via duck_tails

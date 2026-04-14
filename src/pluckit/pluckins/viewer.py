@@ -31,7 +31,7 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, overload
 
 from pluckit._sql import _esc
-from pluckit.plugins.base import Pluckin
+from pluckit.pluckins.base import Pluckin
 from pluckit.types import PluckerError
 
 if TYPE_CHECKING:
@@ -745,7 +745,7 @@ class AstViewer(Pluckin):
     Usage:
 
         from pluckit import Plucker
-        from pluckit.plugins.viewer import AstViewer
+        from pluckit.pluckins.viewer import AstViewer
 
         pluck = Plucker(code="src/**/*.py", plugins=[AstViewer])
         print(pluck.view(".fn#main"))

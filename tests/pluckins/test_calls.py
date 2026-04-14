@@ -6,7 +6,7 @@ import textwrap
 import pytest
 
 from pluckit import Plucker
-from pluckit.plugins.calls import Calls
+from pluckit.pluckins.calls import Calls
 
 
 @pytest.fixture

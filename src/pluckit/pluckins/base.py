@@ -1,4 +1,4 @@
-# src/pluckit/plugins/base.py
+# src/pluckit/pluckins/base.py
 """Pluckin base class and registry for pluckit.
 
 pluckit's plugins are colloquially "pluckins" — a portmanteau of
@@ -21,11 +21,11 @@ _KNOWN_PROVIDERS: dict[str, str] = {
     "view": "AstViewer",
 }
 
-_PLUGIN_MAP: dict[str, str] = {
-    "AstViewer": "pluckit.plugins.viewer:AstViewer",
-    "History": "pluckit.plugins.history:History",
-    "Calls": "pluckit.plugins.calls:Calls",
-    "Scope": "pluckit.plugins.scope:Scope",
+_PLUCKIN_MAP: dict[str, str] = {
+    "AstViewer": "pluckit.pluckins.viewer:AstViewer",
+    "History": "pluckit.pluckins.history:History",
+    "Calls": "pluckit.pluckins.calls:Calls",
+    "Scope": "pluckit.pluckins.scope:Scope",
 }
 
 
@@ -33,20 +33,20 @@ def resolve_plugins(names: list[str]) -> list[type[Pluckin]]:
     """Resolve plugin names to classes.
 
     Accepts short names ("AstViewer") or fully-qualified import
-    paths ("mypackage.plugins:MyPlugin").
+    paths ("mypackage.pluckins:MyPluckin").
     """
     import importlib
 
     classes: list[type[Pluckin]] = []
     for name in names:
-        if name in _PLUGIN_MAP:
-            dotted = _PLUGIN_MAP[name]
+        if name in _PLUCKIN_MAP:
+            dotted = _PLUCKIN_MAP[name]
         elif ":" in name:
             dotted = name
         else:
             raise PluckerError(
                 f"Unknown plugin {name!r}. Known plugins: "
-                f"{', '.join(sorted(_PLUGIN_MAP.keys()))}. "
+                f"{', '.join(sorted(_PLUCKIN_MAP.keys()))}. "
                 f"For custom plugins, use 'module.path:ClassName'."
             )
         module_path, class_name = dotted.rsplit(":", 1)

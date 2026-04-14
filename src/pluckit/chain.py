@@ -280,7 +280,7 @@ class Chain:
         ``pop`` pops, and ``reset`` / ``--`` clears.
         """
         from pluckit.plucker import Plucker
-        from pluckit.plugins.base import resolve_plugins
+        from pluckit.pluckins.base import resolve_plugins
         from pluckit.selection import Selection
 
         # Resolve plugins

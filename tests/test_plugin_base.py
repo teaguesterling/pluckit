@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from pluckit.plugins import Pluckin, PluckinRegistry
+from pluckit.pluckins import Pluckin, PluckinRegistry
 from pluckit.types import PluckerError
 
 # ---------------------------------------------------------------------------
@@ -207,13 +207,13 @@ def test_method_provider_prefers_registered_over_known():
 
 def test_backward_compat_plugin_alias():
     """Plugin (the old name) should still work as an alias for Pluckin."""
-    from pluckit.plugins.base import Pluckin, Plugin
+    from pluckit.pluckins.base import Pluckin, Plugin
     assert Plugin is Pluckin
 
 
 def test_backward_compat_registry_alias():
     """PluginRegistry (old name) should still alias PluckinRegistry."""
-    from pluckit.plugins.base import PluckinRegistry, PluginRegistry
+    from pluckit.pluckins.base import PluckinRegistry, PluginRegistry
     assert PluginRegistry is PluckinRegistry
 
 

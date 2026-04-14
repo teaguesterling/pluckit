@@ -14,6 +14,13 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   from generic Python plugins in multi-plugin-system contexts (MCP,
   LSP, etc.). Old names are kept as aliases — existing code importing
   `Plugin` and `PluginRegistry` continues to work without modification.
+- **Breaking: `pluckit.plugins` package renamed to `pluckit.pluckins`.**
+  Imports of the form `from pluckit.plugins.X import Y` must be updated
+  to `from pluckit.pluckins.X import Y`. The class-level aliases
+  (`Plugin = Pluckin`, `PluginRegistry = PluckinRegistry`) remain for
+  source-level backward compat, but the package path itself is a clean
+  break — there is no shim at the old `pluckit.plugins` path. Top-level
+  imports (`from pluckit import AstViewer`, etc.) are unaffected.
 
 ### Added
 
@@ -97,7 +104,7 @@ Breaking changes to the CLI surface — see "Changed" below.
     by current line range
   - `diff(rev)` — per-node unified diff between HEAD and `rev`, using
     the same AST-aware node resolution
-- `Commit` dataclass exported from `pluckit` and `pluckit.plugins`
+- `Commit` dataclass exported from `pluckit` and `pluckit.pluckins`
   for typed access to the fields returned by `history()`.
 
 ### Architecture notes

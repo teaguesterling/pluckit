@@ -15,7 +15,7 @@ import textwrap
 import pytest
 
 from pluckit import Plucker
-from pluckit.plugins import History
+from pluckit.pluckins import History
 from pluckit.types import PluckerError
 
 pytestmark = pytest.mark.skipif(
@@ -287,7 +287,7 @@ class TestHistoryPluginRegistration:
 
 class TestCommitSerialization:
     def test_to_dict(self):
-        from pluckit.plugins.history import Commit
+        from pluckit.pluckins.history import Commit
         c = Commit(hash="abc123", author_name="Alice", author_email="a@example.com",
                    author_date="2026-01-01T00:00:00", message="initial")
         d = c.to_dict()
@@ -295,7 +295,7 @@ class TestCommitSerialization:
                      "author_date": "2026-01-01T00:00:00", "message": "initial"}
 
     def test_from_dict(self):
-        from pluckit.plugins.history import Commit
+        from pluckit.pluckins.history import Commit
         d = {"hash": "abc123", "author_name": "Alice", "author_email": "a@example.com",
              "author_date": "2026-01-01T00:00:00", "message": "initial"}
         c = Commit.from_dict(d)
@@ -303,7 +303,7 @@ class TestCommitSerialization:
         assert c.author_name == "Alice"
 
     def test_to_json_round_trip(self):
-        from pluckit.plugins.history import Commit
+        from pluckit.pluckins.history import Commit
         c = Commit(hash="def456", author_name="Bob", author_email="b@example.com",
                    author_date="2026-02-01T00:00:00", message="feat: something")
         restored = Commit.from_json(c.to_json())

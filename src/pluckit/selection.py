@@ -14,7 +14,7 @@ from typing import TYPE_CHECKING, Any
 import duckdb
 
 from pluckit._sql import _esc, _esc_like, _selector_to_where, descendant_join
-from pluckit.plugins.base import PluckinRegistry
+from pluckit.pluckins.base import PluckinRegistry
 from pluckit.types import PluckerError
 
 if TYPE_CHECKING:
@@ -83,7 +83,7 @@ class Selection:
         if registry is not None:
             provider = registry.method_provider(name)
         else:
-            from pluckit.plugins.base import _KNOWN_PROVIDERS
+            from pluckit.pluckins.base import _KNOWN_PROVIDERS
             provider = _KNOWN_PROVIDERS.get(name)
         if provider:
             raise PluckerError(
@@ -684,5 +684,5 @@ class Selection:
 
     # History operations (history, at, diff, blame, authors) live in the
     # History plugin — they depend on duck_tails and git state, not on the
-    # core AST query infrastructure. Load `pluckit.plugins.History` to use
+    # core AST query infrastructure. Load `pluckit.pluckins.History` to use
     # them. Tracked as Plucker Task 7 / task #38.

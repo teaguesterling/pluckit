@@ -7,7 +7,7 @@ Exposes three methods on ``Selection`` when this plugin is loaded:
 - ``refs()``   — identifier references within the scope containing each match
 
 ``scope()`` wraps sitting_duck's ``::scope`` pseudo-element on ``ast_select``
-the same way :class:`~pluckit.plugins.calls.Calls` wraps ``::callers`` /
+the same way :class:`~pluckit.pluckins.calls.Calls` wraps ``::callers`` /
 ``::callees``. ``defs()`` and ``refs()`` issue direct ``read_ast`` queries
 joined on ``scope_id`` — sitting_duck's per-node scope column.
 
@@ -22,7 +22,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from pluckit._sql import _esc
-from pluckit.plugins.base import Pluckin
+from pluckit.pluckins.base import Pluckin
 
 if TYPE_CHECKING:
     from pluckit.selection import Selection
@@ -34,7 +34,7 @@ class Scope(Pluckin):
     Example::
 
         from pluckit import Plucker
-        from pluckit.plugins import Scope
+        from pluckit.pluckins import Scope
 
         pluck = Plucker(code="src/**/*.py", plugins=[Scope])
 

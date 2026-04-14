@@ -402,12 +402,12 @@ pluck = Plucker(
 
 ### Writing a plugin
 
-A plugin is a subclass of `pluckit.plugins.Plugin`:
+A plugin is a subclass of `pluckit.pluckins.Pluckin`:
 
 ```python
-from pluckit.plugins import Plugin
+from pluckit.pluckins import Pluckin
 
-class WordCount(Plugin):
+class WordCount(Pluckin):
     name = "wordcount"
 
     methods = {

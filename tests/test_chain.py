@@ -7,7 +7,7 @@ import textwrap
 import pytest
 
 from pluckit.chain import Chain, ChainStep
-from pluckit.plugins.base import resolve_plugins
+from pluckit.pluckins.base import resolve_plugins
 
 
 class TestChainStep:
@@ -121,8 +121,8 @@ class TestPluginResolution:
     def test_resolve_known_plugins(self):
         classes = resolve_plugins(["AstViewer", "History"])
         assert len(classes) == 2
-        from pluckit.plugins.history import History
-        from pluckit.plugins.viewer import AstViewer
+        from pluckit.pluckins.history import History
+        from pluckit.pluckins.viewer import AstViewer
         assert AstViewer in classes
         assert History in classes
 

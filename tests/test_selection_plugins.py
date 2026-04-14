@@ -6,7 +6,7 @@ import pytest
 
 from pluckit._context import _Context
 from pluckit._sql import ast_select_sql
-from pluckit.plugins.base import Pluckin, PluckinRegistry
+from pluckit.pluckins.base import Pluckin, PluckinRegistry
 from pluckit.selection import Selection
 from pluckit.types import PluckerError
 

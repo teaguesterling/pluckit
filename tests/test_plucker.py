@@ -4,7 +4,7 @@ import duckdb
 import pytest
 
 from pluckit.plucker import Plucker
-from pluckit.plugins.base import Pluckin
+from pluckit.pluckins.base import Pluckin
 from pluckit.types import PluckerError
 
 

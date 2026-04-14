@@ -6,7 +6,7 @@ import warnings
 import pytest
 
 from pluckit import AstViewer, Plucker, PluckerError
-from pluckit.plugins.viewer import (
+from pluckit.pluckins.viewer import (
     _default_show,
     _extract_body,
     _extract_signature,
@@ -276,11 +276,11 @@ class TestSignatureTable:
         assert "def top_level_fn(x):" in output
 
     def test_table_cell_escapes_pipes(self):
-        from pluckit.plugins.viewer import _escape_table_cell
+        from pluckit.pluckins.viewer import _escape_table_cell
         assert _escape_table_cell("str | None") == "str \\| None"
 
     def test_table_cell_flattens_multiline(self):
-        from pluckit.plugins.viewer import _escape_table_cell
+        from pluckit.pluckins.viewer import _escape_table_cell
         assert _escape_table_cell("line 1\n    line 2") == "line 1 line 2"
 
 
@@ -303,7 +303,7 @@ class TestNumericShow:
 
 class TestNativeSignature:
     def test_synthesize_function_signature(self):
-        from pluckit.plugins.viewer import _synthesize_signature
+        from pluckit.pluckins.viewer import _synthesize_signature
         node = {
             "type": "function_definition",
             "name": "foo",
@@ -319,7 +319,7 @@ class TestNativeSignature:
         assert sig == "def foo(x: int, y: int) -> int:"
 
     def test_synthesize_class_signature(self):
-        from pluckit.plugins.viewer import _synthesize_signature
+        from pluckit.pluckins.viewer import _synthesize_signature
         node = {
             "type": "class_definition",
             "name": "Foo",
@@ -329,7 +329,7 @@ class TestNativeSignature:
         assert sig == "class Foo:"
 
     def test_synthesize_returns_none_when_no_params(self):
-        from pluckit.plugins.viewer import _synthesize_signature
+        from pluckit.pluckins.viewer import _synthesize_signature
         node = {
             "type": "function_definition",
             "name": "foo",
@@ -339,7 +339,7 @@ class TestNativeSignature:
         assert _synthesize_signature(node) is None
 
     def test_synthesize_go_function(self):
-        from pluckit.plugins.viewer import _synthesize_signature
+        from pluckit.pluckins.viewer import _synthesize_signature
         node = {
             "type": "function_declaration",
             "name": "Foo",
@@ -539,7 +539,7 @@ class TestViewRelation:
         assert "file_path" in rel.columns
 
     def test_tabular_no_connection_needed(self):
-        from pluckit.plugins.viewer import View, ViewBlock
+        from pluckit.pluckins.viewer import View, ViewBlock
         blocks = [
             ViewBlock(markdown="# test", rule=None, show="source",
                      file_path="test.py", start_line=1, end_line=5,
@@ -552,7 +552,7 @@ class TestViewRelation:
         assert rows[0][0] == "test.py"
 
     def test_relation_without_db_raises(self):
-        from pluckit.plugins.viewer import View, ViewBlock
+        from pluckit.pluckins.viewer import View, ViewBlock
         blocks = [
             ViewBlock(markdown="# test", rule=None, show="source",
                      file_path="test.py", start_line=1, end_line=5,
@@ -569,7 +569,7 @@ class TestViewRelation:
 
 class TestViewSerialization:
     def test_from_dict_round_trip(self, pluck):
-        from pluckit.plugins.viewer import View
+        from pluckit.pluckins.viewer import View
         view = pluck.view(".fn#top_level_fn")
         d = view.to_dict()
         restored = View.from_dict(d)
@@ -580,7 +580,7 @@ class TestViewSerialization:
     def test_to_json_round_trip(self, pluck):
         import json
 
-        from pluckit.plugins.viewer import View
+        from pluckit.pluckins.viewer import View
         view = pluck.view(".fn#top_level_fn")
         j = view.to_json()
         data = json.loads(j)
@@ -589,14 +589,14 @@ class TestViewSerialization:
         assert restored.markdown == view.markdown
 
     def test_from_dict_empty_view(self):
-        from pluckit.plugins.viewer import View
+        from pluckit.pluckins.viewer import View
         d = {"query": "", "format": "markdown", "blocks": []}
         v = View.from_dict(d)
         assert len(v) == 0
         assert not v
 
     def test_from_dict_with_blocks(self):
-        from pluckit.plugins.viewer import View
+        from pluckit.pluckins.viewer import View
         d = {
             "query": ".fn",
             "format": "markdown",

@@ -21,7 +21,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from pluckit._sql import _esc
-from pluckit.plugins.base import Pluckin
+from pluckit.pluckins.base import Pluckin
 
 if TYPE_CHECKING:
     from pluckit.selection import Selection
@@ -33,7 +33,7 @@ class Calls(Pluckin):
     Example::
 
         from pluckit import Plucker
-        from pluckit.plugins import Calls
+        from pluckit.pluckins import Calls
 
         pluck = Plucker(code="src/**/*.py", plugins=[Calls])
 
