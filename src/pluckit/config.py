@@ -18,6 +18,8 @@ class PluckitConfig:
     plugins: list[str] = field(default_factory=lambda: ["AstViewer"])
     sources: dict[str, str] = field(default_factory=dict)
     repo: str | None = None
+    cache: bool = False
+    cache_path: str = ".pluckit.duckdb"
 
     # ------------------------------------------------------------------
     # Source resolution
@@ -53,4 +55,6 @@ class PluckitConfig:
             plugins=section.get("plugins", ["AstViewer"]),
             sources=section.get("sources", {}),
             repo=section.get("repo"),
+            cache=section.get("cache", False),
+            cache_path=section.get("cache_path", ".pluckit.duckdb"),
         )

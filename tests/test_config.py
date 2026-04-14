@@ -63,3 +63,28 @@ mydb = "sqlite:///my.db"
         """'code' without any config returns ["code"] as a literal."""
         cfg = PluckitConfig()
         assert cfg.resolve_source("code") == ["code"]
+
+
+class TestCacheConfig:
+    def test_cache_defaults_to_false(self, tmp_path):
+        cfg = PluckitConfig.load(tmp_path)
+        assert cfg.cache is False
+        assert cfg.cache_path == ".pluckit.duckdb"
+
+    def test_cache_from_config(self, tmp_path):
+        (tmp_path / "pyproject.toml").write_text(
+            '[tool.pluckit]\n'
+            'cache = true\n'
+            'cache_path = "custom.duckdb"\n'
+        )
+        cfg = PluckitConfig.load(tmp_path)
+        assert cfg.cache is True
+        assert cfg.cache_path == "custom.duckdb"
+
+    def test_cache_false_explicit(self, tmp_path):
+        (tmp_path / "pyproject.toml").write_text(
+            '[tool.pluckit]\n'
+            'cache = false\n'
+        )
+        cfg = PluckitConfig.load(tmp_path)
+        assert cfg.cache is False
