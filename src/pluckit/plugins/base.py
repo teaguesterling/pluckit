@@ -10,7 +10,7 @@ _KNOWN_PROVIDERS: dict[str, str] = {
     "authors": "History", "history": "History", "filmstrip": "History",
     "when": "History", "co_changes": "History",
     "interface": "Scope", "refs": "Scope", "defs": "Scope",
-    "shadows": "Scope", "unused_params": "Scope",
+    "scope": "Scope", "shadows": "Scope", "unused_params": "Scope",
     "view": "AstViewer",
 }
 
@@ -18,6 +18,7 @@ _PLUGIN_MAP: dict[str, str] = {
     "AstViewer": "pluckit.plugins.viewer:AstViewer",
     "History": "pluckit.plugins.history:History",
     "Calls": "pluckit.plugins.calls:Calls",
+    "Scope": "pluckit.plugins.scope:Scope",
 }
 
 
