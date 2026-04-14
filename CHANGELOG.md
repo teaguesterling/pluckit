@@ -6,8 +6,21 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.8.0] — 2026-04-14
+
+Substantial release adding chain serialization, MCP transport,
+persistent AST caching, and three new pluckins (Calls, Scope, History).
+Breaking changes to the CLI surface — see "Changed" below.
+
 ### Added
 
+- **Calls pluckin** — `callers()`, `callees()`, `references()` methods
+  on Selection, wrapping sitting_duck's `::callers` / `::callees` /
+  `::references` pseudo-elements. Load with `Plucker(plugins=[Calls])`.
+- **Scope pluckin** — `scope()`, `defs()`, `refs()` methods on
+  Selection. `scope()` wraps sitting_duck's `::scope` pseudo-element
+  (returns enclosing scope hierarchy). `defs()` / `refs()` filter by
+  `scope_id` and the flags byte (IS_DEFINITION / IS_REFERENCE).
 - **MCP-ready serialization protocol.** A uniform
   `to/from_{dict,json,argv}` interface across pluckit's core types so
   squackit (and other MCP consumers) can round-trip structured state:
@@ -159,6 +172,22 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `History` pluckin; calling them without loading the pluckin
   raises a `PluckerError` with a pointer via `_KNOWN_PROVIDERS`.
 
+## [0.7.0] — 2026-04-12
+
+Infrastructure sync with the fledgling-mcp ecosystem. No new pluckit-
+facing features; the version bump was required to align with a
+fledgling release. Functionally equivalent to the tip of the
+`feat/training-data-generator` branch at that point (pre-chain,
+pre-MCP-serialization, pre-cache).
+
+### Added
+
+- Fledgling kwargs pass-through (`profile`, `modules`, `init`) on
+  `Plucker.__init__` and `_Context.__init__`.
+- Public `Plucker.connection` property exposing the underlying DuckDB
+  connection (a `fledgling.Connection` proxy when fledgling is
+  installed, otherwise a bare DuckDB connection).
+
 ## [0.1.0a1] — 2026-04-10
 
 First public alpha. Query, view, and mutate all work end-to-end.
@@ -235,5 +264,7 @@ First public alpha. Query, view, and mutate all work end-to-end.
   does not yet expose byte offsets. Character-level insertions
   (`--insert-chars`) are reserved for v0.2.
 
-[Unreleased]: https://github.com/teaguesterling/pluckit/compare/v0.1.0a1...HEAD
+[Unreleased]: https://github.com/teaguesterling/pluckit/compare/v0.8.0...HEAD
+[0.8.0]: https://github.com/teaguesterling/pluckit/releases/tag/v0.8.0
+[0.7.0]: https://github.com/teaguesterling/pluckit/releases/tag/v0.7.0
 [0.1.0a1]: https://github.com/teaguesterling/pluckit/releases/tag/v0.1.0a1
