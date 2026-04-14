@@ -6,6 +6,7 @@ import time
 import duckdb
 import pytest
 
+from pluckit import Plucker
 from pluckit.cache import ASTCache
 
 
@@ -91,3 +92,51 @@ class TestCacheIndex:
         rows = db.sql("SELECT * FROM _pluckit_cache_index").fetchall()
         assert len(rows) == 1
         assert pattern in str(rows[0])
+
+
+class TestPluckerCache:
+    def test_cache_flag_creates_db_file(self, sample_files):
+        p = Plucker(
+            code=str(sample_files / "src/*.py"),
+            cache=True,
+            repo=str(sample_files),
+        )
+        p.find(".fn").count()
+        cache_path = sample_files / ".pluckit.duckdb"
+        assert cache_path.exists()
+
+    def test_cached_query_returns_same_results(self, sample_files):
+        p1 = Plucker(
+            code=str(sample_files / "src/*.py"),
+            cache=True,
+            repo=str(sample_files),
+        )
+        count1 = p1.find(".fn").count()
+
+        p2 = Plucker(
+            code=str(sample_files / "src/*.py"),
+            cache=True,
+            repo=str(sample_files),
+        )
+        count2 = p2.find(".fn").count()
+        assert count1 == count2
+
+    def test_cache_false_uses_memory(self, sample_files):
+        p = Plucker(
+            code=str(sample_files / "src/*.py"),
+            cache=False,
+            repo=str(sample_files),
+        )
+        p.find(".fn").count()
+        cache_path = sample_files / ".pluckit.duckdb"
+        assert not cache_path.exists()
+
+    def test_cache_custom_path(self, sample_files):
+        custom = sample_files / "custom_cache.duckdb"
+        p = Plucker(
+            code=str(sample_files / "src/*.py"),
+            cache=str(custom),
+            repo=str(sample_files),
+        )
+        p.find(".fn").count()
+        assert custom.exists()

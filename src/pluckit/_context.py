@@ -75,6 +75,7 @@ class _Context:
         *,
         repo: str | None = None,
         db: duckdb.DuckDBPyConnection | None = None,
+        db_path: str | None = None,
         profile: str | None = None,
         modules: list[str] | None = None,
         init: str | bool | None = False,
@@ -82,6 +83,10 @@ class _Context:
         self.repo = repo or os.getcwd()
         if db is not None:
             self.db = db
+            self._fledgling_loaded = False
+        elif db_path is not None:
+            # Persistent cache connections — skip fledgling macros for now.
+            self.db = duckdb.connect(db_path)
             self._fledgling_loaded = False
         else:
             self.db, self._fledgling_loaded = _new_connection_with_fledgling(

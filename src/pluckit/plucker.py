@@ -36,13 +36,33 @@ class Plucker:
         plugins: list[type[Plugin] | Plugin] | None = None,
         repo: str | None = None,
         db: duckdb.DuckDBPyConnection | None = None,
+        cache: bool | str = False,
         profile: str | None = None,
         modules: list[str] | None = None,
         init: str | bool | None = False,
     ):
-        self._ctx = _Context(repo=repo, db=db, profile=profile, modules=modules, init=init)
+        import os
+
+        # Resolve cache path
+        db_path: str | None = None
+        if cache:
+            effective_repo = repo or os.getcwd()
+            if isinstance(cache, str):
+                db_path = cache
+            else:
+                db_path = os.path.join(effective_repo, ".pluckit.duckdb")
+
+        self._ctx = _Context(
+            repo=repo, db=db, db_path=db_path,
+            profile=profile, modules=modules, init=init,
+        )
         self._registry = PluginRegistry()
         self._code_source = code
+
+        self._cache = None
+        if cache:
+            from pluckit.cache import ASTCache
+            self._cache = ASTCache(self._ctx.db)
 
         for p in (plugins or []):
             instance = p() if isinstance(p, type) else p
@@ -237,5 +257,11 @@ class Plucker:
             # Glob or path with separators — resolve relative to repo
             if not os.path.isabs(resolved):
                 resolved = os.path.join(self._ctx.repo, resolved)
+
+        # Cache path: use ASTCache when enabled
+        if self._cache is not None:
+            table_name = self._cache.get_or_create(resolved)
+            where = _selector_to_where(selector)
+            return self._ctx.db.sql(f"SELECT * FROM {table_name} WHERE {where}")
 
         return self._ctx.db.sql(ast_select_sql(resolved, selector))
