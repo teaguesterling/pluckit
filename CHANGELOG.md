@@ -6,6 +6,13 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.9.0] — 2026-04-14
+
+Brand-consistency rename for the plugin system. Plugin authors should
+migrate module paths (`pluckit.plugins.*` → `pluckit.pluckins.*`). The
+class-level aliases (`Plugin = Pluckin`) keep existing source compiling
+unchanged.
+
 ### Changed
 
 - **Plugin base class renamed `Plugin` → `Pluckin`** (and `PluginRegistry`
@@ -287,7 +294,8 @@ First public alpha. Query, view, and mutate all work end-to-end.
   does not yet expose byte offsets. Character-level insertions
   (`--insert-chars`) are reserved for v0.2.
 
-[Unreleased]: https://github.com/teaguesterling/pluckit/compare/v0.8.0...HEAD
+[Unreleased]: https://github.com/teaguesterling/pluckit/compare/v0.9.0...HEAD
+[0.9.0]: https://github.com/teaguesterling/pluckit/releases/tag/v0.9.0
 [0.8.0]: https://github.com/teaguesterling/pluckit/releases/tag/v0.8.0
 [0.7.0]: https://github.com/teaguesterling/pluckit/releases/tag/v0.7.0
 [0.1.0a1]: https://github.com/teaguesterling/pluckit/releases/tag/v0.1.0a1
