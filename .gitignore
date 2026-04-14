@@ -8,6 +8,10 @@ build/
 # mkdocs build output
 site/
 
+# pluckit AST cache
+.pluckit.duckdb
+.pluckit.duckdb.wal
+
 # Training data is tracked via git lfs (see .gitattributes)
 # Regenerate with: bash training/run_pipeline.sh generate
 # These are intentionally committed so consumers can train without regenerating.

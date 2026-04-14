@@ -8,6 +8,38 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- **MCP-ready serialization protocol.** A uniform
+  `to/from_{dict,json,argv}` interface across pluckit's core types so
+  squackit (and other MCP consumers) can round-trip structured state:
+  - **`Selector`** — new class (subclasses `str`) with `validate()`,
+    `is_valid`, and the full serialization protocol. Backward-compatible
+    everywhere a bare selector string is used today.
+  - **`Plucker`** — serializes its constructor args (code, plugins,
+    repo), not the live DuckDB connection. Plugin names resolve via
+    `resolve_plugins()` on deserialization.
+  - **`View`** — gains `from_dict`, `from_json`, `to_json` (already had
+    `to_dict`). Round-trips through JSON.
+  - **`Selection`** — gains `to_chain()` which walks the `_parent`/`_op`
+    provenance to reconstruct the chain that produced it, plus
+    `to_dict()`/`to_json()` as wrappers.
+  - **`Chain`** — gains `to_argv()` (the inverse of `from_argv`) so a
+    chain round-trips CLI ↔ dict ↔ JSON ↔ argv.
+  - **`Commit`** — gains `to_dict`, `from_dict`, `to_json`, `from_json`.
+- **AST caching (`cache=True`).** A `Plucker(cache=True)` opens a
+  persistent DuckDB file (`.pluckit.duckdb` in the repo root by
+  default) and materializes `read_ast` output into per-pattern tables.
+  Subsequent queries against the same pattern skip re-parsing and hit
+  the cached table directly. File-stat mtime checks drive incremental
+  invalidation — only modified files are re-parsed; the rest of the
+  cache is preserved.
+  - `cache=True` — use `.pluckit.duckdb` under the repo
+  - `cache="/custom/path.duckdb"` — custom cache location
+  - `[tool.pluckit] cache = true` and `cache_path = "..."` in
+    `pyproject.toml`
+  - `ASTCache` and `PluckitConfig` are both exported from the top-level
+    package for programmatic use.
+- `.pluckit.duckdb` and `.pluckit.duckdb.wal` are added to `.gitignore`.
+
 - **`View` return type for `Plucker.view()`**. Previously `view()`
   returned a bare `str` of rendered markdown. It now returns a
   structured `View` object that:
