@@ -22,13 +22,13 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from pluckit._sql import _esc
-from pluckit.plugins.base import Plugin
+from pluckit.plugins.base import Pluckin
 
 if TYPE_CHECKING:
     from pluckit.selection import Selection
 
 
-class Scope(Plugin):
+class Scope(Pluckin):
     """Scope pluckin. Load with ``Plucker(..., plugins=[Scope])``.
 
     Example::

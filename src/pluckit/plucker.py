@@ -4,7 +4,7 @@ from typing import TYPE_CHECKING
 
 from pluckit._context import _Context
 from pluckit._sql import _esc, _selector_to_where, ast_select_sql
-from pluckit.plugins.base import Plugin, PluginRegistry
+from pluckit.plugins.base import Pluckin, PluckinRegistry
 from pluckit.types import PluckerError
 
 if TYPE_CHECKING:
@@ -20,7 +20,7 @@ class Plucker:
 
     Args:
         code: Default source — glob pattern, file path, or DuckDB table/view name.
-        plugins: Plugin classes or instances to register.
+        plugins: Pluckin classes or instances to register.
         repo: Repository root (defaults to cwd). Globs resolve relative to this.
         db: Existing DuckDB connection to reuse.
         profile: Fledgling profile (e.g. ``'analyst'``). When given without
@@ -33,7 +33,7 @@ class Plucker:
         self,
         code: str | None = None,
         *,
-        plugins: list[type[Plugin] | Plugin] | None = None,
+        plugins: list[type[Pluckin] | Pluckin] | None = None,
         repo: str | None = None,
         db: duckdb.DuckDBPyConnection | None = None,
         cache: bool | str = False,
@@ -56,7 +56,7 @@ class Plucker:
             repo=repo, db=db, db_path=db_path,
             profile=profile, modules=modules, init=init,
         )
-        self._registry = PluginRegistry()
+        self._registry = PluckinRegistry()
         self._code_source = code
 
         self._cache = None

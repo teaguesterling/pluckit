@@ -31,7 +31,7 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, overload
 
 from pluckit._sql import _esc
-from pluckit.plugins.base import Plugin
+from pluckit.plugins.base import Pluckin
 from pluckit.types import PluckerError
 
 if TYPE_CHECKING:
@@ -739,7 +739,7 @@ def _extract_signature(lines: list[str], start_line: int, end_line: int, languag
 # AstViewer plugin
 # ---------------------------------------------------------------------------
 
-class AstViewer(Plugin):
+class AstViewer(Pluckin):
     """CSS-style viewer for matched code regions.
 
     Usage:

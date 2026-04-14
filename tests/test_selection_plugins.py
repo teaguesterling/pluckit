@@ -6,12 +6,12 @@ import pytest
 
 from pluckit._context import _Context
 from pluckit._sql import ast_select_sql
-from pluckit.plugins.base import Plugin, PluginRegistry
+from pluckit.plugins.base import Pluckin, PluckinRegistry
 from pluckit.selection import Selection
 from pluckit.types import PluckerError
 
 
-class CountPlugin(Plugin):
+class CountPlugin(Pluckin):
     name = "counter"
     methods = {"double_count": "_double_count"}
 
@@ -21,7 +21,7 @@ class CountPlugin(Plugin):
 
 @pytest.fixture
 def registry():
-    reg = PluginRegistry()
+    reg = PluckinRegistry()
     reg.register(CountPlugin())
     return reg
 

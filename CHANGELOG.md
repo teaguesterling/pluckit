@@ -6,6 +6,22 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed
+
+- **Plugin base class renamed `Plugin` → `Pluckin`** (and `PluginRegistry`
+  → `PluckinRegistry`) for brand consistency with the rest of the
+  pluckit family ("pluckin" = pluckit + plugin) and to disambiguate
+  from generic Python plugins in multi-plugin-system contexts (MCP,
+  LSP, etc.). Old names are kept as aliases — existing code importing
+  `Plugin` and `PluginRegistry` continues to work without modification.
+
+### Added
+
+- `PluckinRegistry.pluckins` property — returns the list of unique
+  registered pluckin instances. Designed for downstream consumers
+  (e.g., squackit) to enumerate pluckins for tool/integration
+  discovery without coupling pluckit to specific consumer APIs.
+
 ## [0.8.0] — 2026-04-14
 
 Substantial release adding chain serialization, MCP transport,

@@ -4,7 +4,7 @@ import duckdb
 import pytest
 
 from pluckit.plucker import Plucker
-from pluckit.plugins.base import Plugin
+from pluckit.plugins.base import Pluckin
 from pluckit.types import PluckerError
 
 
@@ -78,7 +78,7 @@ class TestSourceMethod:
 
 class TestPluginWiring:
     def test_plugin_methods_available(self, proj_dir):
-        class Dummy(Plugin):
+        class Dummy(Pluckin):
             name = "dummy"
             methods = {"ping": "_ping"}
             def _ping(self, sel):

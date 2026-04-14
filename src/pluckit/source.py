@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from pluckit._context import _Context as Context
-    from pluckit.plugins.base import PluginRegistry
+    from pluckit.plugins.base import PluckinRegistry
     from pluckit.selection import Selection
 
 
@@ -17,7 +17,7 @@ class Source:
     Lazy — no I/O until .find() is called.
     """
 
-    def __init__(self, glob: str, context: Context, registry: PluginRegistry | None = None) -> None:
+    def __init__(self, glob: str, context: Context, registry: PluckinRegistry | None = None) -> None:
         self.glob = glob
         self._ctx = context
         self._registry = registry

@@ -1,5 +1,12 @@
 # src/pluckit/plugins/base.py
-"""Plugin base class and registry for pluckit."""
+"""Pluckin base class and registry for pluckit.
+
+pluckit's plugins are colloquially "pluckins" — a portmanteau of
+pluckit + plugin. The base class ``Pluckin`` (and its registry
+``PluckinRegistry``) are the canonical names; ``Plugin`` and
+``PluginRegistry`` are kept as backward-compat aliases at the bottom
+of this module.
+"""
 from __future__ import annotations
 
 from pluckit.types import PluckerError
@@ -22,7 +29,7 @@ _PLUGIN_MAP: dict[str, str] = {
 }
 
 
-def resolve_plugins(names: list[str]) -> list[type[Plugin]]:
+def resolve_plugins(names: list[str]) -> list[type[Pluckin]]:
     """Resolve plugin names to classes.
 
     Accepts short names ("AstViewer") or fully-qualified import
@@ -30,7 +37,7 @@ def resolve_plugins(names: list[str]) -> list[type[Plugin]]:
     """
     import importlib
 
-    classes: list[type[Plugin]] = []
+    classes: list[type[Pluckin]] = []
     for name in names:
         if name in _PLUGIN_MAP:
             dotted = _PLUGIN_MAP[name]
@@ -54,24 +61,35 @@ def resolve_plugins(names: list[str]) -> list[type[Plugin]]:
     return classes
 
 
-class Plugin:
-    """Base class for pluckit plugins."""
+class Pluckin:
+    """Base class for pluckit pluckins."""
     name: str = ""
     methods: dict[str, str] = {}         # {public_name: implementation_method_name}
     pseudo_classes: dict[str, dict] = {} # {pseudo_class_name: config_dict}
     upgrades: dict[str, str] = {}        # {existing_method: upgrade_method_name}
 
 
-class PluginRegistry:
-    """Holds registered plugins and dispatches method lookups."""
+class PluckinRegistry:
+    """Holds registered pluckins and dispatches method lookups."""
 
     def __init__(self) -> None:
-        self.methods: dict[str, tuple[Plugin, str]] = {}
-        self.upgrades: dict[str, tuple[Plugin, str]] = {}
+        self.methods: dict[str, tuple[Pluckin, str]] = {}
+        self.upgrades: dict[str, tuple[Pluckin, str]] = {}
         self.pseudo_classes: dict[str, dict] = {}
+        self._pluckins: list[Pluckin] = []
 
-    def register(self, plugin: Plugin) -> None:
-        """Register a plugin instance.
+    @property
+    def pluckins(self) -> list[Pluckin]:
+        """All registered pluckin instances, in registration order.
+
+        Designed for downstream consumers (e.g., squackit) that want to
+        enumerate pluckins for tool/integration discovery without
+        coupling pluckit to specific consumer APIs.
+        """
+        return list(self._pluckins)
+
+    def register(self, plugin: Pluckin) -> None:
+        """Register a pluckin instance.
 
         Raises PluckerError if a duplicate public method name is encountered.
         """
@@ -90,12 +108,21 @@ class PluginRegistry:
         for method_name, upgrade_impl in plugin.upgrades.items():
             self.upgrades[method_name] = (plugin, upgrade_impl)
 
+        self._pluckins.append(plugin)
+
     def method_provider(self, method_name: str) -> str | None:
         """Return the plugin name that provides *method_name*, or None.
 
-        Checks registered plugins first, then the hardcoded _KNOWN_PROVIDERS
+        Checks registered pluckins first, then the hardcoded _KNOWN_PROVIDERS
         dict so callers get helpful error messages even when a plugin is not loaded.
         """
         if method_name in self.methods:
             return self.methods[method_name][0].name
         return _KNOWN_PROVIDERS.get(method_name)
+
+
+# Backward-compat aliases — pluckit's base class was renamed Plugin → Pluckin
+# in v0.9.0 for brand consistency. Existing plugins importing Plugin keep
+# working; new code should prefer Pluckin.
+Plugin = Pluckin
+PluginRegistry = PluckinRegistry

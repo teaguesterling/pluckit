@@ -4,14 +4,14 @@ from __future__ import annotations
 
 import pytest
 
-from pluckit.plugins import Plugin, PluginRegistry
+from pluckit.plugins import Pluckin, PluckinRegistry
 from pluckit.types import PluckerError
 
 # ---------------------------------------------------------------------------
 # Dummy plugins used across multiple tests
 # ---------------------------------------------------------------------------
 
-class DummyPlugin(Plugin):
+class DummyPlugin(Pluckin):
     name = "dummy"
     methods = {"greet": "_greet"}
 
@@ -19,7 +19,7 @@ class DummyPlugin(Plugin):
         return f"hello {name}"
 
 
-class AnotherPlugin(Plugin):
+class AnotherPlugin(Pluckin):
     name = "another"
     methods = {"farewell": "_farewell"}
 
@@ -27,7 +27,7 @@ class AnotherPlugin(Plugin):
         return "goodbye"
 
 
-class UpgradePlugin(Plugin):
+class UpgradePlugin(Pluckin):
     name = "upgrader"
     upgrades = {"greet": "_upgrade_greet"}
 
@@ -35,7 +35,7 @@ class UpgradePlugin(Plugin):
         return f"{core_result}!"
 
 
-class PseudoPlugin(Plugin):
+class PseudoPlugin(Pluckin):
     name = "pseudo"
     pseudo_classes = {"focused": {"filter": "is_focused"}}
 
@@ -79,14 +79,14 @@ def test_plugin_with_upgrades():
 # ---------------------------------------------------------------------------
 
 def test_register_adds_method():
-    registry = PluginRegistry()
+    registry = PluckinRegistry()
     plugin = DummyPlugin()
     registry.register(plugin)
     assert "greet" in registry.methods
 
 
 def test_register_lookup_returns_plugin_and_impl():
-    registry = PluginRegistry()
+    registry = PluckinRegistry()
     plugin = DummyPlugin()
     registry.register(plugin)
     provider, impl_name = registry.methods["greet"]
@@ -95,7 +95,7 @@ def test_register_lookup_returns_plugin_and_impl():
 
 
 def test_calling_through_registry_works():
-    registry = PluginRegistry()
+    registry = PluckinRegistry()
     plugin = DummyPlugin()
     registry.register(plugin)
     provider, impl_name = registry.methods["greet"]
@@ -104,7 +104,7 @@ def test_calling_through_registry_works():
 
 
 def test_multiple_plugins_register_correctly():
-    registry = PluginRegistry()
+    registry = PluckinRegistry()
     dummy = DummyPlugin()
     another = AnotherPlugin()
     registry.register(dummy)
@@ -116,7 +116,7 @@ def test_multiple_plugins_register_correctly():
 
 
 def test_duplicate_method_name_raises_plucker_error():
-    registry = PluginRegistry()
+    registry = PluckinRegistry()
     registry.register(DummyPlugin())
     with pytest.raises(PluckerError):
         registry.register(DummyPlugin())
@@ -127,7 +127,7 @@ def test_duplicate_method_name_raises_plucker_error():
 # ---------------------------------------------------------------------------
 
 def test_register_adds_pseudo_classes():
-    registry = PluginRegistry()
+    registry = PluckinRegistry()
     registry.register(PseudoPlugin())
     assert "focused" in registry.pseudo_classes
     assert registry.pseudo_classes["focused"] == {"filter": "is_focused"}
@@ -138,7 +138,7 @@ def test_register_adds_pseudo_classes():
 # ---------------------------------------------------------------------------
 
 def test_register_adds_upgrades():
-    registry = PluginRegistry()
+    registry = PluckinRegistry()
     registry.register(DummyPlugin())
     registry.register(UpgradePlugin())
     assert "greet" in registry.upgrades
@@ -148,7 +148,7 @@ def test_register_adds_upgrades():
 
 
 def test_calling_upgrade_through_registry():
-    registry = PluginRegistry()
+    registry = PluckinRegistry()
     dummy = DummyPlugin()
     upgrader = UpgradePlugin()
     registry.register(dummy)
@@ -163,39 +163,99 @@ def test_calling_upgrade_through_registry():
 # ---------------------------------------------------------------------------
 
 def test_method_provider_returns_registered_plugin_name():
-    registry = PluginRegistry()
+    registry = PluckinRegistry()
     registry.register(DummyPlugin())
     assert registry.method_provider("greet") == "dummy"
 
 
 def test_method_provider_callers_returns_calls():
-    registry = PluginRegistry()
+    registry = PluckinRegistry()
     assert registry.method_provider("callers") == "Calls"
 
 
 def test_method_provider_at_returns_history():
-    registry = PluginRegistry()
+    registry = PluckinRegistry()
     assert registry.method_provider("at") == "History"
 
 
 def test_method_provider_interface_returns_scope():
-    registry = PluginRegistry()
+    registry = PluckinRegistry()
     assert registry.method_provider("interface") == "Scope"
 
 
 def test_method_provider_unknown_returns_none():
-    registry = PluginRegistry()
+    registry = PluckinRegistry()
     assert registry.method_provider("totally_unknown_method") is None
 
 
 def test_method_provider_prefers_registered_over_known():
     """If a plugin is registered for a name that's also in _KNOWN_PROVIDERS,
     the registered plugin's name takes priority."""
-    class CallsOverride(Plugin):
+    class CallsOverride(Pluckin):
         name = "my_calls"
         methods = {"callers": "_callers"}
         def _callers(self, selection): ...
 
-    registry = PluginRegistry()
+    registry = PluckinRegistry()
     registry.register(CallsOverride())
     assert registry.method_provider("callers") == "my_calls"
+
+
+# ---------------------------------------------------------------------------
+# Backward-compat aliases (Plugin → Pluckin rename in v0.9.0)
+# ---------------------------------------------------------------------------
+
+def test_backward_compat_plugin_alias():
+    """Plugin (the old name) should still work as an alias for Pluckin."""
+    from pluckit.plugins.base import Pluckin, Plugin
+    assert Plugin is Pluckin
+
+
+def test_backward_compat_registry_alias():
+    """PluginRegistry (old name) should still alias PluckinRegistry."""
+    from pluckit.plugins.base import PluckinRegistry, PluginRegistry
+    assert PluginRegistry is PluckinRegistry
+
+
+# ---------------------------------------------------------------------------
+# PluckinRegistry.pluckins iterator
+# ---------------------------------------------------------------------------
+
+def test_pluckin_registry_iterator():
+    """PluckinRegistry should expose registered pluckins via .pluckins."""
+    registry = PluckinRegistry()
+    instance = DummyPlugin()
+    registry.register(instance)
+    assert len(registry.pluckins) == 1
+    assert registry.pluckins[0] is instance
+
+
+def test_pluckin_registry_iterator_deduplicates():
+    """A pluckin registered once (for multiple methods) appears once."""
+    class MultiMethod(Pluckin):
+        name = "multi"
+        methods = {"a": "_a", "b": "_b"}
+        def _a(self, selection): return 1
+        def _b(self, selection): return 2
+
+    registry = PluckinRegistry()
+    instance = MultiMethod()
+    registry.register(instance)
+    assert len(registry.pluckins) == 1
+    assert registry.pluckins[0] is instance
+
+
+def test_pluckin_registry_iterator_includes_upgrade_only_pluckins():
+    """A pluckin that only provides upgrades should still appear."""
+    registry = PluckinRegistry()
+    registry.register(DummyPlugin())
+    registry.register(UpgradePlugin())
+    pluckins = registry.pluckins
+    assert len(pluckins) == 2
+    names = {p.name for p in pluckins}
+    assert names == {"dummy", "upgrader"}
+
+
+def test_pluckin_registry_iterator_empty():
+    registry = PluckinRegistry()
+    assert registry.pluckins == []

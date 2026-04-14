@@ -3,7 +3,7 @@ from pluckit.cache import ASTCache
 from pluckit.chain import Chain, ChainStep
 from pluckit.config import PluckitConfig
 from pluckit.plucker import Plucker
-from pluckit.plugins.base import Plugin, PluginRegistry
+from pluckit.plugins.base import Pluckin, PluckinRegistry, Plugin, PluginRegistry
 from pluckit.plugins.calls import Calls
 from pluckit.plugins.history import Commit, History
 from pluckit.plugins.scope import Scope
@@ -73,7 +73,9 @@ __all__ = [
     # Config / cache
     "PluckitConfig",
     "ASTCache",
-    # Plugins
+    # Pluckins (plugins)
+    "Pluckin",
+    "PluckinRegistry",
     "Plugin",
     "PluginRegistry",
     "AstViewer",

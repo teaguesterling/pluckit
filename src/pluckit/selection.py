@@ -14,7 +14,7 @@ from typing import TYPE_CHECKING, Any
 import duckdb
 
 from pluckit._sql import _esc, _esc_like, _selector_to_where, descendant_join
-from pluckit.plugins.base import PluginRegistry
+from pluckit.plugins.base import PluckinRegistry
 from pluckit.types import PluckerError
 
 if TYPE_CHECKING:
@@ -55,7 +55,7 @@ _FILTER_SUFFIXES = {"startswith", "endswith", "contains", "gt", "lt", "gte", "lt
 class Selection:
     """A lazy set of AST nodes backed by a DuckDB relation."""
 
-    def __init__(self, relation: duckdb.DuckDBPyRelation, context: Context, registry: PluginRegistry | None = None, *, _parent: Selection | None = None, _op: tuple | None = None) -> None:
+    def __init__(self, relation: duckdb.DuckDBPyRelation, context: Context, registry: PluckinRegistry | None = None, *, _parent: Selection | None = None, _op: tuple | None = None) -> None:
         self._rel = relation
         self._ctx = context
         self._registry = registry

@@ -27,7 +27,7 @@ import subprocess
 from dataclasses import asdict, dataclass
 from typing import TYPE_CHECKING, Any
 
-from pluckit.plugins.base import Plugin
+from pluckit.plugins.base import Pluckin
 from pluckit.types import PluckerError
 
 if TYPE_CHECKING:
@@ -62,7 +62,7 @@ class Commit:
         return cls.from_dict(_json.loads(text))
 
 
-class History(Plugin):
+class History(Pluckin):
     """git-history pluckin. Load with ``Plucker(..., plugins=[History])``.
 
     Example::
