@@ -17,6 +17,7 @@ _KNOWN_PROVIDERS: dict[str, str] = {
 _PLUGIN_MAP: dict[str, str] = {
     "AstViewer": "pluckit.plugins.viewer:AstViewer",
     "History": "pluckit.plugins.history:History",
+    "Calls": "pluckit.plugins.calls:Calls",
 }
 
 

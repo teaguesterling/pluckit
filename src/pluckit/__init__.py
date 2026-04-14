@@ -4,6 +4,7 @@ from pluckit.chain import Chain, ChainStep
 from pluckit.config import PluckitConfig
 from pluckit.plucker import Plucker
 from pluckit.plugins.base import Plugin, PluginRegistry
+from pluckit.plugins.calls import Calls
 from pluckit.plugins.history import Commit, History
 from pluckit.plugins.viewer import AstViewer, View, ViewBlock
 from pluckit.selection import Selection
@@ -77,6 +78,7 @@ __all__ = [
     "AstViewer",
     "History",
     "Commit",
+    "Calls",
     # View result types
     "View",
     "ViewBlock",
