@@ -364,3 +364,107 @@ class TestSelectionToChain:
         j = sel.to_json()
         data = json.loads(j)
         assert data["steps"][0]["op"] == "find"
+
+
+class TestPaginationOps:
+    def test_limit_selection_method(self, eval_repo):
+        from pluckit import Plucker
+        pluck = Plucker(code=str(eval_repo / "src/*.py"))
+        sel = pluck.find(".fn").limit(2)
+        assert sel.count() <= 2
+
+    def test_offset_selection_method(self, eval_repo):
+        from pluckit import Plucker
+        pluck = Plucker(code=str(eval_repo / "src/*.py"))
+        all_count = pluck.find(".fn").count()
+        skipped = pluck.find(".fn").offset(1).count()
+        assert skipped == max(0, all_count - 1)
+
+    def test_page_selection_method(self, eval_repo):
+        from pluckit import Plucker
+        pluck = Plucker(code=str(eval_repo / "src/*.py"))
+        page0 = pluck.find(".fn").page(0, 2).count()
+        assert page0 <= 2
+
+
+class TestPaginationChain:
+    def test_chain_with_limit_adds_page_metadata(self, eval_repo):
+        chain = Chain(
+            source=[str(eval_repo / "src/*.py")],
+            steps=[
+                ChainStep(op="find", args=[".fn"]),
+                ChainStep(op="limit", args=["2"]),
+                ChainStep(op="names"),
+            ],
+        )
+        result = chain.evaluate()
+        assert "page" in result
+        assert result["page"]["limit"] == 2
+        assert result["page"]["offset"] == 0
+        assert "source_chain" in result
+        # Source chain strips limit
+        source_ops = [s["op"] for s in result["source_chain"]["steps"]]
+        assert "limit" not in source_ops
+
+    def test_chain_without_pagination_has_no_page_key(self, eval_repo):
+        chain = Chain(
+            source=[str(eval_repo / "src/*.py")],
+            steps=[
+                ChainStep(op="find", args=[".fn"]),
+                ChainStep(op="count"),
+            ],
+        )
+        result = chain.evaluate()
+        assert "page" not in result
+        assert "source_chain" not in result
+
+    def test_page_op_translates_to_offset_and_limit(self, eval_repo):
+        chain = Chain(
+            source=[str(eval_repo / "src/*.py")],
+            steps=[
+                ChainStep(op="find", args=[".fn"]),
+                ChainStep(op="page", args=["1", "1"]),  # page 1, size 1 -> offset 1, limit 1
+                ChainStep(op="names"),
+            ],
+        )
+        result = chain.evaluate()
+        assert result["page"]["offset"] == 1
+        assert result["page"]["limit"] == 1
+
+    def test_source_chain_roundtrip(self, eval_repo):
+        chain = Chain(
+            source=[str(eval_repo / "src/*.py")],
+            steps=[
+                ChainStep(op="find", args=[".fn"]),
+                ChainStep(op="limit", args=["2"]),
+                ChainStep(op="names"),
+            ],
+        )
+        result = chain.evaluate()
+        # Rebuild source_chain from dict, evaluate it for full count
+        source = Chain.from_dict(result["source_chain"])
+        source.steps.append(ChainStep(op="count"))
+        full_count = source.evaluate()["data"]
+        assert result["page"]["total"] == full_count
+
+    def test_has_more_flag(self, eval_repo):
+        # Assume eval_repo has >= 3 functions so page 0 size 1 has_more=True
+        chain = Chain(
+            source=[str(eval_repo / "src/*.py")],
+            steps=[
+                ChainStep(op="find", args=[".fn"]),
+                ChainStep(op="limit", args=["1"]),
+                ChainStep(op="names"),
+            ],
+        )
+        result = chain.evaluate()
+        if result["page"]["total"] > 1:
+            assert result["page"]["has_more"] is True
+
+    def test_cli_parses_limit_and_offset(self):
+        chain = Chain.from_argv([
+            "src/**/*.py", "find", ".fn", "limit", "10", "offset", "5", "names",
+        ])
+        ops = [s.op for s in chain.steps]
+        assert "limit" in ops
+        assert "offset" in ops

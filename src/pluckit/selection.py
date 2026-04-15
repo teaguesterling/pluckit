@@ -414,6 +414,41 @@ class Selection:
         return result
 
     # ---------------------------------------------------------------
+    # Pagination
+    # ---------------------------------------------------------------
+
+    def limit(self, n: int) -> Selection:
+        """Take the first ``n`` matched nodes."""
+        n = int(n)
+        view = self._register("lim")
+        try:
+            rel = self._ctx.db.sql(f"SELECT * FROM {view} LIMIT {n}")
+        except Exception:
+            self._unregister(view)
+            raise
+        # Don't unregister: the new relation still references the view.
+        # Cleanup happens when the underlying connection closes.
+        return self._new(rel, op=("limit", (n,), {}))
+
+    def offset(self, n: int) -> Selection:
+        """Skip the first ``n`` matched nodes."""
+        n = int(n)
+        view = self._register("off")
+        try:
+            rel = self._ctx.db.sql(f"SELECT * FROM {view} OFFSET {n}")
+        except Exception:
+            self._unregister(view)
+            raise
+        # Don't unregister: the new relation still references the view.
+        return self._new(rel, op=("offset", (n,), {}))
+
+    def page(self, n: int, size: int) -> Selection:
+        """Shorthand for ``offset(n * size).limit(size)``."""
+        n = int(n)
+        size = int(size)
+        return self.offset(n * size).limit(size)
+
+    # ---------------------------------------------------------------
     # Dunder methods
     # ---------------------------------------------------------------
 

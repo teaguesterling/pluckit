@@ -78,6 +78,8 @@ class Chain:
         "clearBody",
         # Terminals
         "count", "names", "text", "attr", "complexity", "materialize",
+        # Pagination
+        "limit", "offset", "page",
         # Plugin ops
         "view", "history", "authors", "at", "diff", "blame",
         # Control
@@ -270,6 +272,7 @@ class Chain:
     _PLUGIN_OPS = frozenset({
         "view", "history", "authors", "at", "diff", "blame",
     })
+    _PAGINATION_OPS = frozenset({"limit", "offset", "page"})
 
     def evaluate(self) -> dict[str, Any]:
         """Execute this chain and return a JSON-serializable result dict.
@@ -336,6 +339,23 @@ class Chain:
                 result_data = view_result.to_dict()
                 continue
 
+            # Pagination ops — operate on current selection like nav ops
+            if op in self._PAGINATION_OPS:
+                if current is None:
+                    msg = f"Pagination op '{op}' requires a selection (use find first)"
+                    raise ValueError(msg)
+                if op == "limit":
+                    n = int(step.args[0]) if step.args else 0
+                    current = current.limit(n)
+                elif op == "offset":
+                    n = int(step.args[0]) if step.args else 0
+                    current = current.offset(n)
+                elif op == "page":
+                    page_num = int(step.args[0]) if len(step.args) > 0 else 0
+                    page_size = int(step.args[1]) if len(step.args) > 1 else 50
+                    current = current.page(page_num, page_size)
+                continue
+
             # Terminal ops
             if op in self._TERMINAL_OPS:
                 if current is None:
@@ -374,33 +394,111 @@ class Chain:
 
         # Build final result
         if result_type is not None:
-            return {
+            result = {
                 "chain": self.to_dict(),
                 "type": result_type,
                 "data": result_data,
             }
-
-        # No terminal was hit
-        if had_mutation:
-            return {
+        elif had_mutation:
+            # No terminal was hit, but mutations were applied
+            result = {
                 "chain": self.to_dict(),
                 "type": "mutation",
                 "data": {"applied": True},
             }
-
-        # Default: materialize the current selection
-        if current is not None:
+        elif current is not None:
+            # Default: materialize the current selection
             rows = current.materialize()
-            return {
+            result = {
                 "chain": self.to_dict(),
                 "type": "materialize",
                 "data": _make_json_safe(rows),
             }
+        else:
+            result = {
+                "chain": self.to_dict(),
+                "type": "materialize",
+                "data": [],
+            }
 
-        return {
-            "chain": self.to_dict(),
-            "type": "materialize",
-            "data": [],
+        # Attach pagination metadata if any pagination op appeared in the chain.
+        self._attach_pagination_metadata(result)
+        return result
+
+    def _attach_pagination_metadata(self, result: dict[str, Any]) -> None:
+        """Mutate *result* in place, adding ``source_chain`` + ``page`` keys
+        when this chain contains any pagination ops.
+
+        ``total`` is computed by re-evaluating a "source chain" (this chain
+        with all pagination ops stripped) with a ``count`` terminal appended.
+        Any existing terminal in the source chain is dropped before the count
+        is appended so the count query is well-formed.
+        """
+        if not any(s.op in self._PAGINATION_OPS for s in self.steps):
+            return
+
+        # Compute effective offset / limit by walking pagination ops in order.
+        effective_offset = 0
+        effective_limit: int | None = None
+        for step in self.steps:
+            if step.op == "offset":
+                effective_offset += int(step.args[0]) if step.args else 0
+            elif step.op == "limit":
+                effective_limit = int(step.args[0]) if step.args else None
+            elif step.op == "page":
+                page_num = int(step.args[0]) if len(step.args) > 0 else 0
+                page_size = int(step.args[1]) if len(step.args) > 1 else 50
+                effective_offset = page_num * page_size
+                effective_limit = page_size
+
+        # Build the source_chain (this chain minus pagination ops).
+        source_steps = [s for s in self.steps if s.op not in self._PAGINATION_OPS]
+        source_chain = Chain(
+            source=self.source,
+            steps=source_steps,
+            plugins=self.plugins,
+            repo=self.repo,
+        )
+
+        # Compute total via a copy of source_chain with any existing terminal
+        # / view op stripped and a fresh ``count`` appended.
+        _NON_COUNT_TERMINALS = self._TERMINAL_OPS | {"view"}
+        count_steps = [s for s in source_steps if s.op not in _NON_COUNT_TERMINALS]
+        count_steps.append(ChainStep(op="count"))
+        count_chain = Chain(
+            source=self.source,
+            steps=count_steps,
+            plugins=self.plugins,
+            repo=self.repo,
+        )
+        try:
+            count_result = count_chain.evaluate()
+            total_raw = count_result.get("data")
+            total: int | None = int(total_raw) if total_raw is not None else None
+        except Exception:
+            total = None
+
+        data = result.get("data")
+        if isinstance(data, list):
+            data_length = len(data)
+        elif isinstance(data, int):
+            data_length = data
+        else:
+            data_length = 1
+
+        if total is not None and effective_limit is not None:
+            has_more = (effective_offset + data_length) < total
+        elif total is not None:
+            has_more = effective_offset + data_length < total
+        else:
+            has_more = False
+
+        result["source_chain"] = source_chain.to_dict()
+        result["page"] = {
+            "offset": effective_offset,
+            "limit": effective_limit,
+            "total": total,
+            "has_more": has_more,
         }
 
 

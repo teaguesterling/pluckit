@@ -6,6 +6,15 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- Chain-level pagination. New ops limit / offset / page in the
+  chain vocabulary, with matching Selection methods. Chain.evaluate()
+  result envelope gains source_chain + page metadata (offset, limit,
+  total, has_more) whenever any pagination op appears in the chain.
+  Consumers can rebuild the "next page" chain by taking source_chain
+  and appending a new offset/limit. No MCP-layer wrapping needed.
+
 ## [0.10.0] — 2026-04-14
 
 ### Added
