@@ -6,6 +6,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.10.0] — 2026-04-14
+
 ### Added
 
 - **`Isolated` type** — new terminal on `Selection` via `.isolate()` that
@@ -17,6 +19,16 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   Supports `to_dict` / `from_dict` / `to_json` / `from_json` for
   transport. Useful for extracting runnable snippets that an agent or
   user can paste into a notebook or test.
+
+### Notes
+
+- The `Calls` pluckin's implementation (callers/callees/references)
+  will simplify substantially once sitting_duck ships a `parents` array
+  column and a structured `scope` struct (`{current, function, class,
+  module, stack}`) on every `read_ast` row. The current provenance-walk
+  + `ast_select` round-trip is a workaround for that missing schema.
+  When upstream lands, the per-file fan-out collapses to a single
+  lateral join. See docstring in `src/pluckit/pluckins/calls.py`.
 
 ## [0.9.0] — 2026-04-14
 
@@ -306,7 +318,8 @@ First public alpha. Query, view, and mutate all work end-to-end.
   does not yet expose byte offsets. Character-level insertions
   (`--insert-chars`) are reserved for v0.2.
 
-[Unreleased]: https://github.com/teaguesterling/pluckit/compare/v0.9.0...HEAD
+[Unreleased]: https://github.com/teaguesterling/pluckit/compare/v0.10.0...HEAD
+[0.10.0]: https://github.com/teaguesterling/pluckit/releases/tag/v0.10.0
 [0.9.0]: https://github.com/teaguesterling/pluckit/releases/tag/v0.9.0
 [0.8.0]: https://github.com/teaguesterling/pluckit/releases/tag/v0.8.0
 [0.7.0]: https://github.com/teaguesterling/pluckit/releases/tag/v0.7.0
