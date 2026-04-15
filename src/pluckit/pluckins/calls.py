@@ -17,16 +17,14 @@ union the results. This keeps the plugin small and relies on
 sitting_duck for the actual call-graph analysis.
 
 Upstream simplification (future sitting_duck release):
-    sitting_duck is adding a ``parents`` array column and a structured
-    ``scope`` struct of shape ``{current, function, class, module,
-    stack}`` on every ``read_ast`` row. When that lands, the provenance-
-    walk + ``ast_select`` round-trip here can collapse to a single
-    lateral join: "for each match, find all call-expression rows whose
-    ``scope.function`` points at a function with our target name" (for
-    callers), or "rows whose ``parents`` includes our match node and
-    type is ``call``" (for callees). No selector re-parsing, no per-
-    file fan-out. Track when sitting_duck ships that schema and
-    simplify this module accordingly.
+    sitting_duck is adding a structured ``scope`` struct of shape
+    ``{current, function, class, module, stack}`` on every ``read_ast``
+    row. When that lands, the provenance-walk + ``ast_select`` round-
+    trip here can collapse substantially: for ``callers()`` we can
+    filter directly on ``scope.function`` pointing at a function with
+    our target name, with no selector re-parsing and no per-file fan-
+    out. Track when sitting_duck ships that schema and simplify this
+    module accordingly.
 """
 from __future__ import annotations
 

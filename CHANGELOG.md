@@ -23,12 +23,13 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ### Notes
 
 - The `Calls` pluckin's implementation (callers/callees/references)
-  will simplify substantially once sitting_duck ships a `parents` array
-  column and a structured `scope` struct (`{current, function, class,
-  module, stack}`) on every `read_ast` row. The current provenance-walk
-  + `ast_select` round-trip is a workaround for that missing schema.
-  When upstream lands, the per-file fan-out collapses to a single
-  lateral join. See docstring in `src/pluckit/pluckins/calls.py`.
+  will simplify once sitting_duck ships a structured `scope` struct
+  (`{current, function, class, module, stack}`) on every `read_ast`
+  row. The current provenance-walk + `ast_select` round-trip is a
+  workaround for that missing schema — when upstream lands, the per-
+  file fan-out collapses substantially (filter directly on
+  `scope.function` for callers). See docstring in
+  `src/pluckit/pluckins/calls.py`.
 
 ## [0.9.0] — 2026-04-14
 
