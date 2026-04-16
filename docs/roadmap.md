@@ -84,31 +84,81 @@ authors just import it.
 The naive approach — a static `intent_tags` attribute set once at
 plugin registration — is too rigid. A tool's offering can reshape by
 mode: in `explore` it offers read-only inspection methods; in
-`implement` it adds mutation methods. Example sketch:
+`implement` it adds mutation methods.
+
+**Intent-driven guidance.** When the agent has a specific task in
+mind (`intent`), participants can return *usage guidance* alongside
+the raw tool list — "here's how to use me for this kind of work".
+This turns the participant API from passive metadata into an active
+teacher: the agent asks "I want to refactor this function's call
+sites", kibitzer broadcasts the intent to every participant, and the
+tools themselves pitch in with concrete usage patterns. Example:
 
 ```python
 # Protocol defined in kibitzer, implemented by any tool
 class KibitzerParticipant(Protocol):
-    def on_mode_change(self, mode: str) -> list[ToolOffering]:
-        """Return the tools this participant wants exposed for `mode`.
-        Called by kibitzer on every ChangeToolMode."""
+    def on_mode_change(
+        self,
+        mode: str,
+        intent: str | None = None,
+    ) -> ParticipantResponse:
+        """Return the tools and (optional) usage guidance this
+        participant offers for `mode` and — if supplied — `intent`.
+
+        Called by kibitzer on every ChangeToolMode transition and
+        optionally on intent changes within a mode.
+        """
+
+@dataclass
+class ParticipantResponse:
+    tools: list[ToolOffering]
+    guidance: list[str] = field(default_factory=list)  # prose hints
+    examples: list[dict] = field(default_factory=list) # optional structured examples
 
 class Calls(Pluckin):  # pluckin side
-    def on_mode_change(self, mode: str) -> list[ToolOffering]:
-        if mode in ("explore", "review"):
-            return [ToolOffering(name="callers", ...),
-                    ToolOffering(name="callees", ...)]
-        return []  # not surfaced in implement / test / docs modes
+    def on_mode_change(self, mode, intent=None) -> ParticipantResponse:
+        if mode not in ("explore", "review"):
+            return ParticipantResponse(tools=[])
+
+        tools = [
+            ToolOffering(name="callers", ...),
+            ToolOffering(name="callees", ...),
+            ToolOffering(name="references", ...),
+        ]
+        guidance = []
+        if intent and "refactor" in intent.lower():
+            guidance.append(
+                "Before renaming a function, use `callers` to find "
+                "every call site. Chain it: "
+                "find .fn#old callers rename new — this renames both "
+                "the definition and every call in one transaction."
+            )
+        elif intent and ("security" in intent.lower() or "audit" in intent.lower()):
+            guidance.append(
+                "Use `references` on auth-related functions to find "
+                "all code paths that touch them. `callers` misses name "
+                "references that aren't direct calls (e.g., function "
+                "objects passed to higher-order functions)."
+            )
+        return ParticipantResponse(tools=tools, guidance=guidance)
 ```
 
-On a mode transition, kibitzer walks every registered participant,
-calls `on_mode_change`, aggregates the returned offerings into the
-new MCP tool manifest, and re-announces the capability set. Agents
-see a different tool surface per mode; the total capability didn't
-change, just what's visible.
+On a mode transition (or intent change), kibitzer walks every
+registered participant, calls `on_mode_change`, aggregates the
+returned tool offerings into the new MCP capability set, and surfaces
+the `guidance` strings to the agent alongside the tool list. Agents
+get "here are the tools visible in this mode" + "here's how the tools
+themselves suggest using them for what you said you wanted to do."
 
-Participants without `on_mode_change` fall back to "always visible" —
-no regression for existing pluckins.
+Participants without `on_mode_change` fall back to "always visible,
+no guidance" — no regression for existing pluckins.
+
+**Why the guidance is bundled with the tool offering:** the tool
+knows its own nuances better than the agent does. A human writing a
+runbook discovers `Calls.callers` misses function-object references
+the hard way; a pluckin that carries that guidance teaches every
+agent that invokes it in a security-review intent. The cost of
+discovery transfers from the agent to the pluckin author, once.
 
 The primitive generalizes: this same participant API can serve
 LSP-aware filtering, VSCode command palettes, etc. Each consumer
