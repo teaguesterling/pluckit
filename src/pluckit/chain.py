@@ -545,10 +545,28 @@ class Chain:
         """Mutate *result* in place, adding ``source_chain`` + ``page`` keys
         when this chain contains any pagination ops.
 
-        ``total`` is computed by re-evaluating a "source chain" (this chain
-        with all pagination ops stripped) with a ``count`` terminal appended.
-        Any existing terminal in the source chain is dropped before the count
-        is appended so the count query is well-formed.
+        ``total`` is **not** computed eagerly — it defaults to ``None``.
+        Call ``Chain.with_total(result)`` afterwards if you need the exact
+        count (costs one extra SQL query).
+
+        ``has_more`` is computed heuristically:
+        - If ``data_length < limit``: definitively ``False`` (got fewer
+          than asked for → no more).
+        - If ``data_length == limit``: conservatively ``True`` (might be
+          exactly the last page, but we can't know without ``total``).
+        - If ``limit`` is ``None``: ``None`` (unknown).
+
+        **Interaction notes:**
+
+        - ``page N SIZE`` sets *both* offset and limit. A subsequent
+          ``limit`` or ``offset`` op overrides the corresponding value.
+          This is well-defined but potentially confusing; callers should
+          use *either* ``page`` *or* ``offset`` + ``limit``, not both.
+        - ``limit`` applied before a mutation restricts the mutation to
+          the first N matches: ``find .fn limit 5 rename bar`` renames
+          only the first 5 functions. This is correct (the Selection
+          contains 5 rows at mutation time) but may surprise callers
+          who expected limit to apply only to terminal output.
         """
         if not any(s.op in self._PAGINATION_OPS for s in self.steps):
             return
@@ -576,24 +594,7 @@ class Chain:
             repo=self.repo,
         )
 
-        # Compute total via a copy of source_chain with any existing terminal
-        # / view op stripped and a fresh ``count`` appended.
-        _NON_COUNT_TERMINALS = self._TERMINAL_OPS | {"view"}
-        count_steps = [s for s in source_steps if s.op not in _NON_COUNT_TERMINALS]
-        count_steps.append(ChainStep(op="count"))
-        count_chain = Chain(
-            source=self.source,
-            steps=count_steps,
-            plugins=self.plugins,
-            repo=self.repo,
-        )
-        try:
-            count_result = count_chain.evaluate()
-            total_raw = count_result.get("data")
-            total: int | None = int(total_raw) if total_raw is not None else None
-        except Exception:
-            total = None
-
+        # Heuristic has_more (no extra query)
         data = result.get("data")
         if isinstance(data, list):
             data_length = len(data)
@@ -602,20 +603,57 @@ class Chain:
         else:
             data_length = 1
 
-        if total is not None and effective_limit is not None:
-            has_more = (effective_offset + data_length) < total
-        elif total is not None:
-            has_more = effective_offset + data_length < total
+        if effective_limit is not None:
+            has_more: bool | None = data_length >= effective_limit
         else:
-            has_more = False
+            has_more = None
 
         result["source_chain"] = source_chain.to_dict()
         result["page"] = {
             "offset": effective_offset,
             "limit": effective_limit,
-            "total": total,
+            "total": None,
             "has_more": has_more,
         }
+
+    @classmethod
+    def with_total(cls, evaluated_result: dict[str, Any]) -> dict[str, Any]:
+        """Fill in ``page.total`` and refine ``has_more`` on a paginated result.
+
+        Runs one extra SQL query (a ``count`` against the ``source_chain``).
+        Mutates *evaluated_result* in place and also returns it for chaining.
+
+        If the result has no pagination metadata, returns it unchanged.
+        """
+        page = evaluated_result.get("page")
+        source_dict = evaluated_result.get("source_chain")
+        if page is None or source_dict is None:
+            return evaluated_result
+
+        _NON_COUNT_TERMINALS = cls._TERMINAL_OPS | {"view"}
+        source = cls.from_dict(source_dict)
+        count_steps = [s for s in source.steps if s.op not in _NON_COUNT_TERMINALS]
+        count_steps.append(ChainStep(op="count"))
+        count_chain = Chain(
+            source=source.source,
+            steps=count_steps,
+            plugins=source.plugins,
+            repo=source.repo,
+        )
+        try:
+            count_result = count_chain.evaluate()
+            total_raw = count_result.get("data")
+            total = int(total_raw) if total_raw is not None else None
+        except Exception:
+            total = None
+
+        page["total"] = total
+        if total is not None and page.get("limit") is not None:
+            data = evaluated_result.get("data")
+            data_length = len(data) if isinstance(data, list) else 1
+            page["has_more"] = (page["offset"] + data_length) < total
+
+        return evaluated_result
 
 
 def _make_json_safe(obj: Any) -> Any:

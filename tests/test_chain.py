@@ -441,14 +441,17 @@ class TestPaginationChain:
             ],
         )
         result = chain.evaluate()
-        # Rebuild source_chain from dict, evaluate it for full count
+        # total is lazy — not computed until with_total() is called
+        assert result["page"]["total"] is None
+        # Call with_total to fill it in
+        Chain.with_total(result)
         source = Chain.from_dict(result["source_chain"])
         source.steps.append(ChainStep(op="count"))
         full_count = source.evaluate()["data"]
         assert result["page"]["total"] == full_count
 
-    def test_has_more_flag(self, eval_repo):
-        # Assume eval_repo has >= 3 functions so page 0 size 1 has_more=True
+    def test_has_more_heuristic(self, eval_repo):
+        # Limit 1 with >= 3 functions → got exactly 1 item back → has_more=True (heuristic)
         chain = Chain(
             source=[str(eval_repo / "src/*.py")],
             steps=[
@@ -458,8 +461,39 @@ class TestPaginationChain:
             ],
         )
         result = chain.evaluate()
-        if result["page"]["total"] > 1:
-            assert result["page"]["has_more"] is True
+        # Heuristic: got 1 item, asked for 1 → conservatively True
+        assert result["page"]["has_more"] is True
+
+    def test_has_more_false_when_fewer_than_limit(self, eval_repo):
+        from pluckit import Plucker
+        pluck = Plucker(code=str(eval_repo / "src/*.py"))
+        total = pluck.find(".fn").count()
+        chain = Chain(
+            source=[str(eval_repo / "src/*.py")],
+            steps=[
+                ChainStep(op="find", args=[".fn"]),
+                ChainStep(op="limit", args=[str(total + 10)]),
+                ChainStep(op="names"),
+            ],
+        )
+        result = chain.evaluate()
+        # Got fewer than limit → definitively False
+        assert result["page"]["has_more"] is False
+
+    def test_with_total_refines_has_more(self, eval_repo):
+        chain = Chain(
+            source=[str(eval_repo / "src/*.py")],
+            steps=[
+                ChainStep(op="find", args=[".fn"]),
+                ChainStep(op="limit", args=["1"]),
+                ChainStep(op="names"),
+            ],
+        )
+        result = chain.evaluate()
+        assert result["page"]["total"] is None
+        Chain.with_total(result)
+        assert result["page"]["total"] is not None
+        assert isinstance(result["page"]["total"], int)
 
     def test_cli_parses_limit_and_offset(self):
         chain = Chain.from_argv([
@@ -550,8 +584,10 @@ class TestPaginationHelpers:
             ],
         )
         result = chain.evaluate()
+        # total is lazy — use with_total or just check goto works
+        Chain.with_total(result)
         total = result["page"]["total"]
-        if total > 2:
+        if total is not None and total > 2:
             p2 = Chain.goto_page(result, 2)
             assert p2 is not None
             p2_result = p2.evaluate()
