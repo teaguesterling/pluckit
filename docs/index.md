@@ -10,8 +10,35 @@ and gives you back a lazy `Selection` object that chains through filters,
 navigation, view rendering, and structural mutations.
 
 !!! info "Status"
-    v0.1-alpha. Query, view, and mutate all work end-to-end. Call graph,
-    git history, and scope plugins are landing in v0.2.
+    Alpha. Query, view, mutate, call-graph, git history, and scope
+    analysis all work end-to-end. See **What's new** below.
+
+## What's new
+
+Recent releases (v0.9 – v0.11.1):
+
+- **`Isolated`** — `Selection.isolate()` extracts a code block along
+  with its free-variable dependencies, classifying each name as a
+  parameter, import, or builtin; renders as a standalone function or
+  Jupyter cell.
+- **Pagination** — `limit` / `offset` / `page` work as chain ops and
+  as Selection methods. `Chain.evaluate()` attaches pagination
+  metadata; `Chain.next_page` / `prev_page` / `goto_page` build
+  follow-up chains; `Chain.with_total` computes the exact total on
+  demand.
+- **`Calls` and `Scope` pluckins** — call-graph (`callers`, `callees`,
+  `references`) and scope-aware queries (`scope`, `defs`, `refs`) via
+  sitting_duck's pseudo-elements.
+- **`Selector` class** — a validated, serializable `str` subclass;
+  drop-in replacement for bare selector strings, with
+  `.validate()` / `.to_dict()` / `.to_json()` / `.to_argv()`.
+- **Persistent AST cache** — `Plucker(cache=True)` or
+  `[tool.pluckit] cache = true` materializes `read_ast` output into a
+  `.pluckit.duckdb` file and re-parses only files whose mtime has
+  changed.
+- **`Pluckin` rename** — the extension-point class is now `Pluckin`
+  (under `pluckit.pluckins`). The old `Plugin` / `pluckit.plugins`
+  names remain as aliases for backward compatibility.
 
 ## Why pluckit
 
@@ -59,28 +86,31 @@ fails.
 
 ## A 30-second tour
 
+pluckit's CLI is a **chain** — source first, then operations. See the
+[CLI reference](cli.md) for the full vocabulary.
+
 ### Find
 
 ```bash
-pluckit find ".fn:exported" src/**/*.py
-# src/auth.py:14:authenticate
-# src/auth.py:42:decode_jwt
-# src/users.py:8:get_user
+pluckit src/**/*.py find ".fn:exported" names
+# authenticate
+# decode_jwt
+# get_user
 # ...
 
-pluckit find ".fn[name^=test_]" --count tests/*.py
+pluckit tests/*.py find ".fn[name^=test_]" count
 # 218
 ```
 
 ### View
 
 ```bash
-pluckit view ".fn#validate_token { show: signature; }" src/**/*.py
+pluckit src/**/*.py find ".fn#validate_token" view ".fn#validate_token { show: signature; }"
 # ```python
 # def validate_token(token: str, *, clock_skew: int = 30) -> User:
 # ```
 
-pluckit view ".cls#Config" src/config.py
+pluckit src/config.py find ".cls#Config" view
 # Class outline: header + every method signature, inline
 ```
 
@@ -88,11 +118,10 @@ pluckit view ".cls#Config" src/config.py
 
 ```bash
 # Add a parameter to every exported function AND update every call site
-pluckit edit \
-    ".fn:exported" --add-param "trace_id: str | None = None" \
+pluckit src/**/*.py \
+    find ".fn:exported" addParam "trace_id: str | None = None" \
     -- \
-    ".call:exported" --add-arg "trace_id=trace_id" \
-    src/**/*.py
+    find ".call:exported" addArg "trace_id=trace_id"
 ```
 
 Every file in the transaction rolls back if any of them fails to re-parse.
@@ -125,8 +154,9 @@ pluck.find(".fn#old_name").rename("new_name")
 
     ---
 
-    Complete reference for `pluckit view`, `find`, `edit`, and `init`,
-    including every flag, output format, and chainable-edit pattern.
+    Complete reference for the chain-based CLI — sources, step
+    operations (query, navigation, mutation, pagination), global
+    flags, JSON I/O, and `pluckit init`.
 
     [:octicons-arrow-right-24: Read the CLI docs](cli.md)
 

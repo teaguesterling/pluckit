@@ -1,7 +1,7 @@
 # Python API
 
 pluckit's Python API is built around three types: `Plucker` (the entry
-point), `Selection` (a lazy query chain), and `Plugin` (the extension
+point), `Selection` (a lazy query chain), and `Pluckin` (the extension
 point). Everything else is either a mutation class or a convenience
 wrapper around these.
 
@@ -25,18 +25,27 @@ mutating code.
 Plucker(
     code: str | list[str] | None = None,
     *,
-    plugins: list[Plugin | type[Plugin]] = (),
+    plugins: list[Pluckin | type[Pluckin]] = (),
     repo: str | None = None,
     db: duckdb.DuckDBPyConnection | None = None,
+    cache: bool | str = False,
 )
 ```
 
 | Parameter | Description                                                              |
 |-----------|--------------------------------------------------------------------------|
 | `code`    | Glob pattern(s) or explicit file list for the source corpus              |
-| `plugins` | Plugin classes or instances to register                                  |
+| `plugins` | Pluckin classes or instances to register                                 |
 | `repo`    | Repository root for relative paths (default: current working directory)  |
 | `db`      | An existing DuckDB connection to reuse (default: create a fresh one)     |
+| `cache`   | Persistent AST cache. `True` → `.pluckit.duckdb` in repo root. `str` → custom path. |
+
+**Persistent AST caching.** When `cache=True`, pluckit opens a
+persistent DuckDB file (`.pluckit.duckdb` by default) and materializes
+`read_ast` output into per-pattern tables. Subsequent queries against
+the same pattern skip re-parsing. File-stat mtime checks drive
+incremental invalidation — only modified files are re-parsed. See
+`[tool.pluckit] cache = true` in `pyproject.toml` for the config path.
 
 ### Methods
 
@@ -62,6 +71,35 @@ print(pluck.view(".fn#main { show: signature; }"))
 
 Create a `Source` handle for ad-hoc queries against a different glob
 without creating a whole new Plucker.
+
+---
+
+## `Selector`
+
+A validated, serializable CSS-over-AST selector string. Subclasses
+`str` so it's backward-compatible everywhere a bare selector string
+is used today — all existing code like `pluck.find(".fn:exported")`
+keeps working.
+
+```python
+from pluckit import Selector
+
+s = Selector(".fn:exported")
+assert isinstance(s, str)
+assert s.is_valid
+
+# Invalid selector resolving to nothing
+Selector(".nonexistent_taxonomy_class").validate()  # raises PluckerError
+```
+
+Supports the standard serialization protocol:
+
+| Method | Purpose |
+|--------|---------|
+| `.to_dict()` / `.from_dict(d)` | `{"selector": "..."}` dict form |
+| `.to_json()` / `.from_json(s)` | JSON string |
+| `.to_argv()` / `.from_argv(tokens)` | CLI token list |
+| `.validate()` / `.is_valid` | Compile-time check |
 
 ---
 
@@ -246,6 +284,61 @@ per-node blocks from aggregates.
 
 ---
 
+## `Isolated`
+
+A scope-aware extraction of a code block with its dependencies.
+Returned by `Selection.isolate()`. Identifies which identifiers the
+block reads from outside its own scope, classifies each as imported /
+parameter / builtin, and renders the result as a standalone function
+or a Jupyter cell.
+
+```python
+from pluckit import Plucker
+
+pluck = Plucker(code="src/**/*.py")
+iso = pluck.find(".fn#outer").isolate()
+
+iso.params         # ['helper']           — free variables → function params
+iso.imports        # ['import json']      — import statements to prepend
+iso.builtins_used  # ['len']              — builtins used (informational)
+iso.body           # original block text
+
+print(iso.as_function("extracted"))   # imports + def extracted(helper): ...
+print(iso.as_jupyter_cell())          # imports + "# Required in scope: helper" + body
+```
+
+### Fields
+
+| Field            | Type        | Description                                 |
+|------------------|-------------|---------------------------------------------|
+| `body`           | `str`       | Source text of the extracted block          |
+| `file_path`      | `str`       | Original source file                        |
+| `start_line`     | `int`       | Start line (1-indexed)                      |
+| `end_line`       | `int`       | End line (1-indexed, inclusive)             |
+| `language`       | `str`       | Source language (e.g., `"python"`)          |
+| `params`         | `list[str]` | Free-variable names → function parameters   |
+| `imports`        | `list[str]` | Import statements the block depends on      |
+| `builtins_used`  | `list[str]` | Python builtins the block uses              |
+
+### Renderers
+
+- `as_function(name="extracted")` — standalone function: imports + `def name(params)` + body
+- `as_jupyter_cell()` — imports + `# Required in scope: ...` comment + inline body (no function wrap)
+
+### Serialization
+
+`to_dict` / `from_dict` / `to_json` / `from_json` for MCP transport.
+
+### Limitations (v1)
+
+- Handles the **first match** only; for multi-match selections,
+  iterate calls with `.limit(1)` narrowing
+- Detects module-level imports but not conditional / relative
+  imports in edge cases
+- Assumes Python semantics for builtins (`dir(builtins)` + `self`/`cls`)
+
+---
+
 ## Chain
 
 The `Chain` class is the programmatic equivalent of the CLI's chain
@@ -359,6 +452,80 @@ Serialize the chain as a JSON string:
 json_str = chain.to_json()
 ```
 
+### Pagination
+
+Chains support `limit`, `offset`, and `page` as ordinary chain ops.
+When any of them appear in a chain, `evaluate()` attaches pagination
+metadata to the result:
+
+```python
+chain = Chain(
+    source=["src/**/*.py"],
+    steps=[
+        ChainStep(op="find", args=[".fn"]),
+        ChainStep(op="page", args=["0", "20"]),  # page 0, size 20
+        ChainStep(op="names"),
+    ],
+)
+result = chain.evaluate()
+
+result["page"]
+# {
+#   "offset": 0,
+#   "limit": 20,
+#   "total": None,        # lazy — call with_total() to fill in
+#   "has_more": True,     # heuristic — True if data length >= limit
+# }
+result["source_chain"]    # the chain with pagination ops stripped — for "give me more"
+```
+
+#### `has_more` heuristic
+
+- `data_length < limit` → definitively `False` (got fewer than asked — no more)
+- `data_length >= limit` → conservatively `True` (might be the last page, but we can't know without `total`)
+- `limit` is `None` → `has_more` is `None` (unknown)
+
+#### `Chain.with_total(result)` — compute the exact total on demand
+
+```python
+Chain.with_total(result)  # mutates result in place, returns it
+result["page"]["total"]   # now an int
+result["page"]["has_more"] # now exact
+```
+
+Runs one extra SQL query against the `source_chain`. No-op if the
+result has no pagination metadata.
+
+#### Navigation helpers
+
+Each returns a new `Chain` ready to evaluate, or `None` when
+navigation isn't possible (no more pages / already at offset 0 /
+result wasn't paginated).
+
+| Method                               | Returns                      |
+|--------------------------------------|------------------------------|
+| `Chain.next_page(result)`            | Chain for the next page (or None) |
+| `Chain.prev_page(result)`            | Chain for the previous page (or None) |
+| `Chain.goto_page(result, n)`         | Chain for page n (0-indexed)  |
+
+```python
+result = chain.evaluate()
+if next_chain := Chain.next_page(result):
+    next_result = next_chain.evaluate()
+```
+
+#### Edge cases
+
+- **`page N SIZE` + subsequent `limit`/`offset`** — `page` sets
+  both offset and limit; a later `limit` or `offset` overrides the
+  corresponding value. Well-defined but confusing — use one pattern
+  or the other, not both.
+- **`limit` before a mutation** — `find .fn limit 5 rename bar`
+  renames only the first 5 functions. The Selection contains 5 rows
+  at mutation time, so the mutation applies to those 5. Correct but
+  may surprise callers who expected `limit` to apply only to terminal
+  output.
+
 ### Round-trip example
 
 ```python
@@ -387,15 +554,15 @@ pluckit is composable. Core capabilities live on `Selection`; anything
 that depends on extra infrastructure moves into a plugin.
 
 ```python
-from pluckit import Plucker, AstViewer
+from pluckit import Plucker, AstViewer, Calls, History, Scope
 
 pluck = Plucker(
     code="src/**/*.py",
     plugins=[
         AstViewer,   # viewer with { show: ... } declarations
-        # Calls,     # call graph (v0.2)
-        # History,   # git history via duck_tails (v0.2)
-        # Scope,     # read/write scope analysis (v0.2)
+        Calls,       # call graph (callers / callees / references)
+        History,     # git history via duck_tails
+        Scope,       # scope-aware queries (defs / refs / enclosing scope)
     ],
 )
 ```
@@ -475,6 +642,60 @@ that touched a file under a previous name are included. `at(rev)` /
 so a pure rename is tracked as long as the node's name survives.
 Structural refactors (a method being pulled out of a class, a
 function being split) are not automatically tracked.
+
+### `Calls` — call-graph operations on selections
+
+```python
+from pluckit import Plucker, Calls
+
+pluck = Plucker(code="src/**/*.py", plugins=[Calls])
+
+# Who calls validate_token?
+callers = pluck.find(".fn#validate_token").callers()
+print(callers.names())
+
+# What does authenticate call?
+callees = pluck.find(".fn#authenticate").callees()
+
+# All references to a name (call sites + bare uses)
+refs = pluck.find(".fn#config").references()
+```
+
+| Method         | Returns       | Description                                  |
+|----------------|---------------|----------------------------------------------|
+| `callers()`    | `Selection`   | Functions that call matched nodes            |
+| `callees()`    | `Selection`   | Functions called by matched nodes            |
+| `references()` | `Selection`   | All references to matched nodes              |
+
+**Dependencies.** `Calls` wraps sitting_duck's `::callers` /
+`::callees` / `::references` pseudo-elements. No extra extensions
+needed.
+
+### `Scope` — scope-aware queries
+
+```python
+from pluckit import Plucker, Scope
+
+pluck = Plucker(code="src/**/*.py", plugins=[Scope])
+
+# Enclosing scope chain (module → class → function)
+scope_chain = pluck.find(".fn#inner").scope()
+
+# Names DEFINED in the scope containing each match
+defs = pluck.find(".fn#outer").defs()
+
+# Name REFERENCES within the scope containing each match
+refs = pluck.find(".fn#outer").refs()
+```
+
+| Method       | Returns      | Description                                          |
+|--------------|--------------|------------------------------------------------------|
+| `scope()`    | `Selection`  | Enclosing scope hierarchy for each match             |
+| `defs()`     | `Selection`  | Definitions in the scope containing each match       |
+| `refs()`     | `Selection`  | References in the scope containing each match        |
+
+**Dependencies.** Uses sitting_duck's `::scope` pseudo-element and
+the `scope_id` / `scope_stack` columns on `read_ast`.
 
 ---
 

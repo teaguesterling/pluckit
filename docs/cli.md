@@ -91,6 +91,19 @@ pluckit src/**/*.py find ".fn#foo" rename "bar" -- find ".call#foo" replace "foo
 | `complexity`     |                    | Print cyclomatic complexity            |
 | `materialize`    |                    | Print matches as JSON                  |
 
+### Pagination operations
+
+| Operation        | Arguments          | Description                            |
+|------------------|--------------------|----------------------------------------|
+| `limit`          | `N`                | Take only the first N matches          |
+| `offset`         | `N`                | Skip the first N matches               |
+| `page`           | `N SIZE`           | Page N (0-indexed), page size SIZE     |
+
+When any pagination op appears in a chain, the result JSON gains
+`source_chain` + `page: {offset, limit, total, has_more}` fields.
+`total` is `None` by default (lazy); `has_more` is heuristic until
+`total` is computed.
+
 ### Mutation operations
 
 | Operation        | Arguments          | Description                            |
@@ -252,6 +265,8 @@ pluckit reads configuration from the `[tool.pluckit]` table in
 ```toml
 [tool.pluckit]
 plugins = ["AstViewer"]
+cache = true                      # opt-in persistent AST cache
+cache_path = ".pluckit.duckdb"    # custom cache location
 
 [tool.pluckit.sources]
 code = ["src/**/*.py"]
@@ -262,6 +277,11 @@ tests = ["tests/**/*.py"]
 The `plugins` list names plugins to load by default. The
 `[tool.pluckit.sources]` table defines named shortcuts that the `-c`,
 `-d`, and `-t` flags (and any custom names) resolve against.
+
+Set `cache = true` to enable the persistent AST cache — pluckit
+materializes `read_ast` output into per-pattern tables in a
+`.pluckit.duckdb` file and re-parses only files whose mtime has
+changed. Override the file location with `cache_path`.
 
 ---
 
