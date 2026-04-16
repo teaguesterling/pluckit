@@ -468,3 +468,105 @@ class TestPaginationChain:
         ops = [s.op for s in chain.steps]
         assert "limit" in ops
         assert "offset" in ops
+
+
+class TestPaginationHelpers:
+    def test_next_page_advances_offset(self, eval_repo):
+        chain = Chain(
+            source=[str(eval_repo / "src/*.py")],
+            steps=[
+                ChainStep(op="find", args=[".fn"]),
+                ChainStep(op="limit", args=["1"]),
+                ChainStep(op="names"),
+            ],
+        )
+        result = chain.evaluate()
+        assert result["page"]["offset"] == 0
+
+        nxt = Chain.next_page(result)
+        if result["page"]["has_more"]:
+            assert nxt is not None
+            next_result = nxt.evaluate()
+            assert next_result["page"]["offset"] == 1
+            # Data should be different
+            assert next_result["data"] != result["data"]
+        else:
+            assert nxt is None
+
+    def test_next_page_returns_none_when_no_more(self, eval_repo):
+        from pluckit import Plucker
+        pluck = Plucker(code=str(eval_repo / "src/*.py"))
+        total = pluck.find(".fn").count()
+
+        # Use a limit >= total so has_more is False
+        chain = Chain(
+            source=[str(eval_repo / "src/*.py")],
+            steps=[
+                ChainStep(op="find", args=[".fn"]),
+                ChainStep(op="limit", args=[str(total + 10)]),
+                ChainStep(op="names"),
+            ],
+        )
+        result = chain.evaluate()
+        assert result["page"]["has_more"] is False
+        assert Chain.next_page(result) is None
+
+    def test_prev_page_on_offset_zero_returns_none(self, eval_repo):
+        chain = Chain(
+            source=[str(eval_repo / "src/*.py")],
+            steps=[
+                ChainStep(op="find", args=[".fn"]),
+                ChainStep(op="limit", args=["1"]),
+                ChainStep(op="names"),
+            ],
+        )
+        result = chain.evaluate()
+        assert result["page"]["offset"] == 0
+        assert Chain.prev_page(result) is None
+
+    def test_prev_page_walks_back(self, eval_repo):
+        chain = Chain(
+            source=[str(eval_repo / "src/*.py")],
+            steps=[
+                ChainStep(op="find", args=[".fn"]),
+                ChainStep(op="offset", args=["2"]),
+                ChainStep(op="limit", args=["1"]),
+                ChainStep(op="names"),
+            ],
+        )
+        result = chain.evaluate()
+        prev = Chain.prev_page(result)
+        assert prev is not None
+        prev_result = prev.evaluate()
+        assert prev_result["page"]["offset"] == 1
+
+    def test_goto_page(self, eval_repo):
+        chain = Chain(
+            source=[str(eval_repo / "src/*.py")],
+            steps=[
+                ChainStep(op="find", args=[".fn"]),
+                ChainStep(op="page", args=["0", "1"]),
+                ChainStep(op="names"),
+            ],
+        )
+        result = chain.evaluate()
+        total = result["page"]["total"]
+        if total > 2:
+            p2 = Chain.goto_page(result, 2)
+            assert p2 is not None
+            p2_result = p2.evaluate()
+            assert p2_result["page"]["offset"] == 2
+
+    def test_helpers_return_none_on_unpaginated_result(self, eval_repo):
+        chain = Chain(
+            source=[str(eval_repo / "src/*.py")],
+            steps=[
+                ChainStep(op="find", args=[".fn"]),
+                ChainStep(op="count"),
+            ],
+        )
+        result = chain.evaluate()
+        # No pagination in chain → no pagination metadata → helpers return None
+        assert Chain.next_page(result) is None
+        assert Chain.prev_page(result) is None
+        assert Chain.goto_page(result, 0) is None

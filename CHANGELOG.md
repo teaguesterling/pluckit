@@ -6,6 +6,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.11.0] — 2026-04-14
+
 ### Added
 
 - Chain-level pagination. New ops limit / offset / page in the
@@ -14,6 +16,12 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   total, has_more) whenever any pagination op appears in the chain.
   Consumers can rebuild the "next page" chain by taking source_chain
   and appending a new offset/limit. No MCP-layer wrapping needed.
+- Pagination navigation helpers: `Chain.next_page(result)`,
+  `Chain.prev_page(result)`, `Chain.goto_page(result, n)`. Each takes
+  an evaluated paginated result dict and returns a new Chain ready to
+  evaluate for the requested page (or `None` when navigation isn't
+  possible — no more pages, already at offset 0, or the result wasn't
+  paginated).
 
 ## [0.10.0] — 2026-04-14
 
@@ -328,7 +336,8 @@ First public alpha. Query, view, and mutate all work end-to-end.
   does not yet expose byte offsets. Character-level insertions
   (`--insert-chars`) are reserved for v0.2.
 
-[Unreleased]: https://github.com/teaguesterling/pluckit/compare/v0.10.0...HEAD
+[Unreleased]: https://github.com/teaguesterling/pluckit/compare/v0.11.0...HEAD
+[0.11.0]: https://github.com/teaguesterling/pluckit/releases/tag/v0.11.0
 [0.10.0]: https://github.com/teaguesterling/pluckit/releases/tag/v0.10.0
 [0.9.0]: https://github.com/teaguesterling/pluckit/releases/tag/v0.9.0
 [0.8.0]: https://github.com/teaguesterling/pluckit/releases/tag/v0.8.0

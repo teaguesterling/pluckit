@@ -251,6 +251,122 @@ class Chain:
         return cls.from_dict(json.loads(text))
 
     # ------------------------------------------------------------------
+    # Pagination navigation helpers
+    # ------------------------------------------------------------------
+
+    @classmethod
+    def next_page(cls, evaluated_result: dict) -> Chain | None:
+        """Build the Chain for the next page of a paginated result.
+
+        Returns None if the result has no pagination metadata or
+        ``has_more`` is False.
+        """
+        page = evaluated_result.get("page")
+        if not page or not page.get("has_more"):
+            return None
+        source_dict = evaluated_result.get("source_chain")
+        if source_dict is None:
+            return None
+        original_chain_dict = evaluated_result.get("chain", {})
+        limit = page.get("limit")
+        current_offset = page.get("offset", 0)
+        if limit is None:
+            return None
+        return cls._build_paginated_chain(
+            source_dict, original_chain_dict,
+            offset=current_offset + limit, limit=limit,
+        )
+
+    @classmethod
+    def prev_page(cls, evaluated_result: dict) -> Chain | None:
+        """Build the Chain for the previous page of a paginated result.
+
+        Returns None if the result has no pagination metadata or
+        the current offset is already 0.
+        """
+        page = evaluated_result.get("page")
+        if not page:
+            return None
+        current_offset = page.get("offset", 0)
+        limit = page.get("limit")
+        if limit is None or current_offset <= 0:
+            return None
+        source_dict = evaluated_result.get("source_chain")
+        if source_dict is None:
+            return None
+        original_chain_dict = evaluated_result.get("chain", {})
+        new_offset = max(0, current_offset - limit)
+        return cls._build_paginated_chain(
+            source_dict, original_chain_dict,
+            offset=new_offset, limit=limit,
+        )
+
+    @classmethod
+    def goto_page(cls, evaluated_result: dict, page_num: int) -> Chain | None:
+        """Build the Chain for a specific 0-indexed page of a paginated result.
+
+        Returns None if the result has no pagination metadata.
+        """
+        page = evaluated_result.get("page")
+        if not page:
+            return None
+        limit = page.get("limit")
+        if limit is None:
+            return None
+        source_dict = evaluated_result.get("source_chain")
+        if source_dict is None:
+            return None
+        original_chain_dict = evaluated_result.get("chain", {})
+        new_offset = max(0, int(page_num) * limit)
+        return cls._build_paginated_chain(
+            source_dict, original_chain_dict,
+            offset=new_offset, limit=limit,
+        )
+
+    @classmethod
+    def _build_paginated_chain(
+        cls,
+        source_dict: dict,
+        original_chain_dict: dict,  # noqa: ARG003 — kept for symmetry/future use
+        *,
+        offset: int,
+        limit: int,
+    ) -> Chain:
+        """Construct a Chain by cloning *source_chain* and inserting pagination
+        ops immediately before its terminal step.
+
+        The source_chain already contains the terminal (since terminals aren't
+        pagination ops, so they survive the ``source_chain = chain - pagination``
+        stripping). We insert ``offset`` + ``limit`` just before the terminal
+        so pagination happens at the DB level, not after materialization.
+        """
+        _TERMINALS = {
+            "count", "names", "text", "attr", "complexity", "materialize",
+            "view", "history", "authors", "at", "diff", "blame",
+        }
+
+        base = cls.from_dict(source_dict)
+
+        new_steps = list(base.steps)
+        # Find the LAST terminal-op position and insert before it; if none,
+        # append to the end.
+        insert_at = len(new_steps)
+        for i in range(len(new_steps) - 1, -1, -1):
+            if new_steps[i].op in _TERMINALS:
+                insert_at = i
+                break
+        new_steps.insert(insert_at, ChainStep(op="limit", args=[str(limit)]))
+        new_steps.insert(insert_at, ChainStep(op="offset", args=[str(offset)]))
+
+        return cls(
+            source=list(base.source),
+            steps=new_steps,
+            plugins=list(base.plugins),
+            repo=base.repo,
+            dry_run=base.dry_run,
+        )
+
+    # ------------------------------------------------------------------
     # Evaluation
     # ------------------------------------------------------------------
 
