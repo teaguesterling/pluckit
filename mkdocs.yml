@@ -72,6 +72,7 @@ nav:
   - CLI Reference: cli.md
   - Python API: api.md
   - Selector & Declaration Language: selectors.md
+  - Roadmap: roadmap.md
   - Changelog: changelog.md
 
 extra:
