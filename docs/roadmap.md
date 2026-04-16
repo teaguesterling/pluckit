@@ -36,6 +36,20 @@ or two when someone picks them up.
   faster on repeat queries. We've never measured it against a realistic
   codebase. One afternoon of work and a blog-ready chart.
 
+- **`Selection.patch()` + `diff()` terminal** — complete the mutation
+  vocabulary by supporting unified-diff input (the natural format for
+  code review workflows). `patch()` applies a diff to matched regions;
+  `diff()` outputs a transform as a unified diff instead of applying
+  it. Enables the `query → transform → diff → review → apply` loop.
+  Tracked as [pluckit#4](https://github.com/teaguesterling/pluckit/issues/4).
+
+- **`@file` argument syntax** — let mutation args (and any string
+  chain argument) read content from a file with an `@path` prefix:
+  `replaceWith @patches/new_handler.py` instead of inlining escaped
+  multi-line code. Applies uniformly to `from_argv`, `from_json`, and
+  mutation methods.
+  Tracked as [pluckit#5](https://github.com/teaguesterling/pluckit/issues/5).
+
 ---
 
 ## Architectural
@@ -43,36 +57,79 @@ or two when someone picks them up.
 Bigger shape questions. Landing any of these requires design work
 before implementation.
 
-### Dynamic, context-aware tool loading
+### Dynamic, context-aware tool loading (via kibitzer modes)
 
-Today, loading pluckit as an MCP tool (via squackit or similar) exposes
-the full tool surface whether or not the current conversation needs
-it. A conversation about documentation loads source-mutation tools it
-will never use; a code-review conversation loads a viewer that wastes
-context budget.
+Today, loading pluckit as an MCP tool (via squackit or similar)
+exposes the full tool surface whether or not the current conversation
+needs it. A conversation about documentation loads source-mutation
+tools it will never use; a code-review conversation loads a viewer
+that wastes context budget.
 
-Direction: **runtime tool selection driven by conversation context.**
+**Upstream mechanism: kibitzer mode-gated tool visibility**
+([kibitzer#1](https://github.com/teaguesterling/kibitzer/issues/1)).
+Kibitzer already defines modes (`explore` / `implement` / `test` /
+`docs` / `review`) that gate writable paths. The proposal is to extend
+them to gate *visible* tools per mode, filtering at MCP capability-
+negotiation time. Per-turn attention surface drops from ~100 tools to
+5-10 per mode; total capability is unchanged. `ChangeToolMode` is the
+existing escape hatch.
 
-- If the conversation is looking at source code, load query/mutate/view
-  tools
-- If it's reading docs, load doc-reading tools; skip mutate
-- If it's reviewing diffs, load History + blame + diff rendering
-- etc.
+**Integration shape: a shared participant API that any tool can
+implement.** Not a per-consumer custom method, but a single protocol
+that pluckit + lackpy + blq + jetsam + any future contributor all
+implement the same way. Kibitzer owns the protocol definition; tool
+authors just import it.
 
-The primitive is a *tool manifest* keyed by context — a declarative
-map from "intent" to "tools" that consumers (squackit / LSP / other
-MCP servers) can query.
+**Bidirectional: tools reflect back to kibitzer on mode change.**
+The naive approach — a static `intent_tags` attribute set once at
+plugin registration — is too rigid. A tool's offering can reshape by
+mode: in `explore` it offers read-only inspection methods; in
+`implement` it adds mutation methods. Example sketch:
+
+```python
+# Protocol defined in kibitzer, implemented by any tool
+class KibitzerParticipant(Protocol):
+    def on_mode_change(self, mode: str) -> list[ToolOffering]:
+        """Return the tools this participant wants exposed for `mode`.
+        Called by kibitzer on every ChangeToolMode."""
+
+class Calls(Pluckin):  # pluckin side
+    def on_mode_change(self, mode: str) -> list[ToolOffering]:
+        if mode in ("explore", "review"):
+            return [ToolOffering(name="callers", ...),
+                    ToolOffering(name="callees", ...)]
+        return []  # not surfaced in implement / test / docs modes
+```
+
+On a mode transition, kibitzer walks every registered participant,
+calls `on_mode_change`, aggregates the returned offerings into the
+new MCP tool manifest, and re-announces the capability set. Agents
+see a different tool surface per mode; the total capability didn't
+change, just what's visible.
+
+Participants without `on_mode_change` fall back to "always visible" —
+no regression for existing pluckins.
+
+The primitive generalizes: this same participant API can serve
+LSP-aware filtering, VSCode command palettes, etc. Each consumer
+defines its own protocol (sharing the bidirectional-on-change shape);
+pluckins implement whichever ones they care about.
 
 ### Tool search / recommendation via kibitzer
 
-Once pluckit has a structured tool surface (the `PluckinRegistry.pluckins`
-iterator is the first piece of this), tying into [kibitzer](https://github.com/teaguesterling/kibitzer)
-for `searchtools` / `recommend_tools` becomes tractable. An agent
-could ask "what pluckit tools would help me answer this?" and get a
-ranked list back, with filters on intent / context / cost.
+A structured tool surface (`PluckinRegistry.pluckins` is the first
+piece) also enables `searchtools` / `recommend_tools` primitives in
+kibitzer. An agent asks "what pluckit tools would help me answer
+this?" and gets a ranked list back, with filters on intent / context
+/ cost.
 
-This is closely related to the context-aware loading item above —
-kibitzer's recommendation output could drive the manifest.
+This complements the mode-gated loading above. Mode-gating is the
+coarse filter ("which tools does this conversation's mode even see");
+recommendation is the fine filter ("of those visible tools, which is
+the right one for this specific sub-task"). kibitzer#1 notes the gap
+it leaves: once visibility is constrained, a `ToolSearch`-equivalent
+is needed for cross-mode discovery. That's the recommendation
+primitive.
 
 ### Consumer-agnostic tool contracts
 
