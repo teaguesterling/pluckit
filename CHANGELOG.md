@@ -6,6 +6,34 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.11.1] — 2026-04-14
+
+### Changed
+
+- **Pagination `total` is now lazy.** `Chain.evaluate()` no longer runs
+  a second count query to populate `page.total` by default. The field
+  is `None` in the result envelope; call `Chain.with_total(result)` to
+  fill it in (costs one extra query). This halves the query cost of
+  paginated chains when the caller doesn't need the exact total.
+- **`has_more` is now heuristic** when `total` is unknown:
+  `data_length < limit` → definitively `False`; `data_length >= limit`
+  → conservatively `True`. `Chain.with_total(result)` refines
+  `has_more` to exact.
+
+### Added
+
+- `Chain.with_total(result)` classmethod — fills in `page.total` and
+  refines `has_more` on a paginated result. Returns the mutated result
+  for chaining. No-op on unpaginated results.
+
+### Documented
+
+- `_attach_pagination_metadata` docstring now calls out two edge
+  cases: `page N SIZE` + subsequent `limit`/`offset` overrides
+  (well-defined but potentially confusing — use one or the other);
+  and `limit` before a mutation restricts the mutation to the first
+  N matches (correct but surprising).
+
 ## [0.11.0] — 2026-04-14
 
 ### Added
@@ -336,7 +364,8 @@ First public alpha. Query, view, and mutate all work end-to-end.
   does not yet expose byte offsets. Character-level insertions
   (`--insert-chars`) are reserved for v0.2.
 
-[Unreleased]: https://github.com/teaguesterling/pluckit/compare/v0.11.0...HEAD
+[Unreleased]: https://github.com/teaguesterling/pluckit/compare/v0.11.1...HEAD
+[0.11.1]: https://github.com/teaguesterling/pluckit/releases/tag/v0.11.1
 [0.11.0]: https://github.com/teaguesterling/pluckit/releases/tag/v0.11.0
 [0.10.0]: https://github.com/teaguesterling/pluckit/releases/tag/v0.10.0
 [0.9.0]: https://github.com/teaguesterling/pluckit/releases/tag/v0.9.0
