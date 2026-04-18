@@ -15,8 +15,16 @@ navigation, view rendering, and structural mutations.
 
 ## What's new
 
-Recent releases (v0.9 – v0.11.1):
+Recent releases (v0.9 – v0.12.0):
 
+- **`--diff` flag** — preview any mutation as a unified diff without
+  writing files. Pipe to `patch`, `git apply`, or pluckit's own `patch`
+  op. `--dry-run` also now works (was parsed but never checked).
+- **`patch` mutation** — apply a unified diff or raw replacement text
+  to matched nodes. Auto-detects format; pairs naturally with `@file`.
+- **`@file` argument syntax** — read argument content from files with
+  `@path`. Works in CLI, JSON, and `from_dict`. Resolution at eval
+  time keeps serialized chains portable.
 - **`Isolated`** — `Selection.isolate()` extracts a code block along
   with its free-variable dependencies, classifying each name as a
   parameter, import, or builtin; renders as a standalone function or
