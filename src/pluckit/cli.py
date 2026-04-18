@@ -55,13 +55,19 @@ Steps (chain operations):
   count / names / text / materialize    Terminal: return data
   view [QUERY]       Render matched regions as markdown
   addParam / removeParam / rename / remove / ...    Mutations
+  patch CONTENT      Apply a unified diff or replacement text
   reset              Start a new find context (also: bare --)
   pop                Return to previous selection scope
+
+Arguments:
+  @PATH              Read argument content from a file
+  @@PATH             Literal @PATH (escape the @ prefix)
 
 Flags:
   --plugin NAME      Load a plugin (repeatable)
   --repo DIR         Repository root (default: cwd)
   --dry-run, -n      Preview changes without writing
+  --diff             Output mutation changes as unified diff (no writes)
   --json JSON        Evaluate a JSON chain string
   --to-json          Emit the parsed chain as JSON (don't evaluate)
   --version          Show version
@@ -76,6 +82,9 @@ Examples:
   pluckit -c find ".fn#validate_token" view
   pluckit src/**/*.py find ".fn#foo" addParam "trace: str = None"
   pluckit src/**/*.py find ".fn#foo" rename bar -- find ".call#foo" addArg "trace=None"
+  pluckit src/**/*.py find ".fn#foo" rename bar --diff > refactor.patch
+  pluckit src/**/*.py find ".fn#foo" replaceWith @patches/new_foo.py
+  pluckit src/**/*.py find ".fn#foo" patch @refactor.patch
 """)
 
 

@@ -685,6 +685,17 @@ class Selection:
         from pluckit.mutations import Remove
         return MutationEngine(self._ctx).apply(self, Remove())
 
+    def patch(self, content: str) -> Selection:
+        """Apply a unified diff or replacement text to matched nodes.
+
+        The content is auto-detected: if it starts with ``---`` or
+        ``diff --git`` it is parsed as a unified diff; otherwise it is
+        treated as raw replacement text (like ``replaceWith``).
+        """
+        from pluckit.mutation import MutationEngine
+        from pluckit.mutations import Patch
+        return MutationEngine(self._ctx).apply(self, Patch(content))
+
     # ---------------------------------------------------------------
     # Extraction — scope-aware block isolation
     # ---------------------------------------------------------------

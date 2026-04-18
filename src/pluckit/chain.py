@@ -20,6 +20,7 @@ from __future__ import annotations
 import json
 import sys
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any
 
 
@@ -42,13 +43,25 @@ class ChainStep:
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> ChainStep:
-        """Construct from a plain dict.  Raises ValueError if *op* is missing."""
+        """Construct from a plain dict.  Raises ValueError if *op* is missing.
+
+        Args in the dict may be plain strings or ``{"file": "path"}``
+        objects.  The object form is normalised to ``"@path"`` so that
+        ``_resolve_file_args`` handles both uniformly at evaluation time.
+        """
         if "op" not in data:
             msg = "ChainStep requires 'op' key"
             raise ValueError(msg)
+        raw_args = data.get("args", [])
+        args: list[str] = []
+        for a in raw_args:
+            if isinstance(a, dict) and "file" in a:
+                args.append(f"@{a['file']}")
+            else:
+                args.append(a)
         return cls(
             op=data["op"],
-            args=data.get("args", []),
+            args=args,
             kwargs=data.get("kwargs", {}),
         )
 
@@ -62,6 +75,7 @@ class Chain:
     plugins: list[str] = field(default_factory=list)
     repo: str | None = None
     dry_run: bool = False
+    diff: bool = False
     json_input: bool = False
     json_output: bool = False
 
@@ -75,7 +89,7 @@ class Chain:
         "replaceWith", "replace", "addParam", "removeParam",
         "addArg", "removeArg", "insertBefore", "insertAfter",
         "rename", "prepend", "append", "wrap", "unwrap", "remove",
-        "clearBody",
+        "clearBody", "patch",
         # Terminals
         "count", "names", "text", "attr", "complexity", "materialize",
         # Pagination
@@ -100,6 +114,7 @@ class Chain:
         plugins: list[str] = []
         repo: str | None = None
         dry_run = False
+        diff = False
         json_input = False
         json_output = False
         source: list[str] | None = None
@@ -116,6 +131,8 @@ class Chain:
                 repo = argv[i]
             elif tok in ("--dry-run", "-n"):
                 dry_run = True
+            elif tok == "--diff":
+                diff = True
             elif tok == "--json":
                 json_input = True
             elif tok == "--to-json":
@@ -147,6 +164,14 @@ class Chain:
         current_step: ChainStep | None = None
 
         for tok in remaining:
+            # Late global flags — allow --dry-run / --diff after steps
+            if tok in ("--dry-run", "-n"):
+                dry_run = True
+                continue
+            if tok == "--diff":
+                diff = True
+                continue
+
             if tok == "--":
                 # Flush current step then insert reset
                 if current_step is not None:
@@ -177,6 +202,7 @@ class Chain:
             plugins=plugins,
             repo=repo,
             dry_run=dry_run,
+            diff=diff,
             json_input=json_input,
             json_output=json_output,
         )
@@ -190,6 +216,8 @@ class Chain:
             tokens.extend(["--repo", self.repo])
         if self.dry_run:
             tokens.append("--dry-run")
+        if self.diff:
+            tokens.append("--diff")
         tokens.extend(self.source)
         for step in self.steps:
             if step.op == "reset":
@@ -213,6 +241,8 @@ class Chain:
             d["repo"] = self.repo
         if self.dry_run:
             d["dry_run"] = self.dry_run
+        if self.diff:
+            d["diff"] = self.diff
         return d
 
     def to_json(self, **kwargs: Any) -> str:
@@ -243,6 +273,7 @@ class Chain:
             plugins=data.get("plugins", []),
             repo=data.get("repo"),
             dry_run=data.get("dry_run", False),
+            diff=data.get("diff", False),
         )
 
     @classmethod
@@ -364,6 +395,7 @@ class Chain:
             plugins=list(base.plugins),
             repo=base.repo,
             dry_run=base.dry_run,
+            diff=base.diff,
         )
 
     # ------------------------------------------------------------------
@@ -383,7 +415,7 @@ class Chain:
     _MUTATION_OPS = frozenset({
         "replaceWith", "addParam", "removeParam", "addArg", "removeArg",
         "insertBefore", "insertAfter", "rename", "prepend", "append",
-        "wrap", "unwrap", "remove",
+        "wrap", "unwrap", "remove", "patch",
     })
     _PLUGIN_OPS = frozenset({
         "view", "history", "authors", "at", "diff", "blame",
@@ -416,8 +448,16 @@ class Chain:
         result_type: str | None = None
         result_data: Any = None
 
+        # Diff/dry-run support: snapshot files before mutations so we can
+        # diff or roll back afterwards.
+        needs_rollback = self.diff or self.dry_run
+        initial_snapshots: dict[str, str] = {}
+
         for step in self.steps:
             op = step.op
+
+            # Resolve @file references in arguments before dispatch.
+            args = _resolve_file_args(step.args)
 
             # Control ops
             if op in ("reset", "--"):
@@ -436,16 +476,16 @@ class Chain:
             if op == "find":
                 if current is not None:
                     stack.append(current)
-                    current = current.find(*step.args, **step.kwargs)
+                    current = current.find(*args, **step.kwargs)
                 else:
-                    current = plucker.find(*step.args, **step.kwargs)
-                last_find_selector = step.args[0] if step.args else None
+                    current = plucker.find(*args, **step.kwargs)
+                last_find_selector = args[0] if args else None
                 continue
 
             # view — special handling, called on plucker
             if op == "view":
-                if step.args:
-                    query = step.args[0]
+                if args:
+                    query = args[0]
                 elif last_find_selector:
                     query = last_find_selector
                 else:
@@ -461,14 +501,14 @@ class Chain:
                     msg = f"Pagination op '{op}' requires a selection (use find first)"
                     raise ValueError(msg)
                 if op == "limit":
-                    n = int(step.args[0]) if step.args else 0
+                    n = int(args[0]) if args else 0
                     current = current.limit(n)
                 elif op == "offset":
-                    n = int(step.args[0]) if step.args else 0
+                    n = int(args[0]) if args else 0
                     current = current.offset(n)
                 elif op == "page":
-                    page_num = int(step.args[0]) if len(step.args) > 0 else 0
-                    page_size = int(step.args[1]) if len(step.args) > 1 else 50
+                    page_num = int(args[0]) if len(args) > 0 else 0
+                    page_size = int(args[1]) if len(args) > 1 else 50
                     current = current.page(page_num, page_size)
                 continue
 
@@ -478,7 +518,7 @@ class Chain:
                     msg = f"Terminal op '{op}' requires a selection (use find first)"
                     raise ValueError(msg)
                 method = getattr(current, op)
-                raw = method(*step.args, **step.kwargs)
+                raw = method(*args, **step.kwargs)
                 result_type = op
                 result_data = _make_json_safe(raw)
                 continue
@@ -488,8 +528,11 @@ class Chain:
                 if current is None:
                     msg = f"Op '{op}' requires a selection (use find first)"
                     raise ValueError(msg)
+                # Snapshot files before mutation for diff/dry-run rollback
+                if op in self._MUTATION_OPS and needs_rollback:
+                    _snapshot_selection_files(current, initial_snapshots)
                 method = getattr(current, op)
-                current = method(*step.args, **step.kwargs)
+                current = method(*args, **step.kwargs)
                 if op in self._MUTATION_OPS:
                     had_mutation = True
                 continue
@@ -500,13 +543,34 @@ class Chain:
                     msg = f"Plugin op '{op}' requires a selection (use find first)"
                     raise ValueError(msg)
                 method = getattr(current, op)
-                raw = method(*step.args, **step.kwargs)
+                raw = method(*args, **step.kwargs)
                 result_type = op
                 result_data = _make_json_safe(raw)
                 continue
 
             msg = f"Unknown chain op: {op!r}"
             raise ValueError(msg)
+
+        # Diff/dry-run: compute diffs and roll back all mutations
+        if needs_rollback and had_mutation and initial_snapshots:
+            diff_result = _diff_and_rollback(initial_snapshots)
+            if self.diff:
+                result = {
+                    "chain": self.to_dict(),
+                    "type": "diff",
+                    "data": diff_result,
+                }
+                self._attach_pagination_metadata(result)
+                return result
+            else:
+                # dry_run without --diff
+                result = {
+                    "chain": self.to_dict(),
+                    "type": "mutation",
+                    "data": {"applied": False, "dry_run": True},
+                }
+                self._attach_pagination_metadata(result)
+                return result
 
         # Build final result
         if result_type is not None:
@@ -654,6 +718,84 @@ class Chain:
             page["has_more"] = (page["offset"] + data_length) < total
 
         return evaluated_result
+
+
+def _snapshot_selection_files(
+    selection: Any,
+    snapshots: dict[str, str],
+) -> None:
+    """Snapshot files touched by *selection* into *snapshots* (if not already present).
+
+    Materializes the selection to discover which files it spans, then reads
+    each one into the snapshot dict.  Already-snapshotted files are skipped.
+    """
+    rows = selection.materialize()
+    for row in rows:
+        fp = row.get("file_path") if isinstance(row, dict) else None
+        if fp and fp not in snapshots:
+            try:
+                snapshots[fp] = Path(fp).read_text(encoding="utf-8")
+            except OSError:
+                pass  # file disappeared — skip
+
+
+def _diff_and_rollback(initial_snapshots: dict[str, str]) -> list[str]:
+    """Diff every snapshotted file against its current disk content, then roll back.
+
+    Returns a list of unified diff strings (one per changed file).
+    """
+    import difflib
+    import os
+
+    diffs: list[str] = []
+    for fp, original in initial_snapshots.items():
+        try:
+            current = Path(fp).read_text(encoding="utf-8")
+        except OSError:
+            continue
+        if current != original:
+            rel = os.path.relpath(fp)
+            diff = "".join(difflib.unified_diff(
+                original.splitlines(keepends=True),
+                current.splitlines(keepends=True),
+                fromfile=f"a/{rel}",
+                tofile=f"b/{rel}",
+            ))
+            diffs.append(diff)
+        # Roll back unconditionally
+        try:
+            Path(fp).write_text(original, encoding="utf-8")
+        except OSError:
+            pass
+    return diffs
+
+
+def _resolve_file_args(args: list[str]) -> list[str]:
+    """Resolve ``@file`` references in step arguments.
+
+    - ``@path`` reads the file at *path* (relative to CWD) and substitutes
+      its content as the argument value.
+    - ``@@path`` is an escape: the leading ``@`` is stripped, yielding the
+      literal string ``@path``.
+    - All other strings pass through unchanged.
+    """
+    from pluckit.types import PluckerError
+
+    resolved: list[str] = []
+    for arg in args:
+        if arg.startswith("@@"):
+            resolved.append(arg[1:])
+        elif arg.startswith("@"):
+            path = Path(arg[1:])
+            if not path.is_file():
+                raise PluckerError(f"@file not found: {path}")
+            try:
+                resolved.append(path.read_text(encoding="utf-8"))
+            except OSError as e:
+                raise PluckerError(f"Cannot read @file {path}: {e}") from e
+        else:
+            resolved.append(arg)
+    return resolved
 
 
 def _make_json_safe(obj: Any) -> Any:

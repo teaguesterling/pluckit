@@ -532,6 +532,166 @@ def _param_name(param: str) -> str:
 
 
 # ---------------------------------------------------------------------------
+# Patch — apply unified diffs or raw replacement text
+# ---------------------------------------------------------------------------
+
+class Patch(Mutation):
+    """Apply a unified diff or raw replacement to matched nodes.
+
+    The content is auto-detected:
+
+    - If it starts with ``---`` or ``diff --git``, it is parsed as a
+      unified diff whose hunks are applied to the node text.
+    - Otherwise it is treated as raw replacement text (like
+      :class:`ReplaceWith`) — the replacement inherits the indentation
+      of the original node.
+    """
+
+    def __init__(self, content: str) -> None:
+        self.content = content
+        self._is_diff = content.lstrip().startswith(("---", "diff --git"))
+
+    def compute(self, node: dict, old_text: str, full_source: str) -> str:
+        if self._is_diff:
+            return self._apply_diff(old_text)
+        # Raw replacement — same behaviour as ReplaceWith.
+        indent = _leading_indent(old_text)
+        return _reindent(self.content, indent)
+
+    def _apply_diff(self, old_text: str) -> str:
+        """Parse unified diff hunks and apply them to *old_text*.
+
+        Context lines must match exactly; raises :class:`PluckerError`
+        on mismatch.
+        """
+        from pluckit.types import PluckerError
+
+        hunks = _parse_unified_diff(self.content)
+        if not hunks:
+            raise PluckerError("Patch content looks like a diff but contains no hunks")
+
+        old_lines = old_text.splitlines(keepends=True)
+        # Apply hunks in reverse order so line numbers stay valid.
+        for hunk in reversed(hunks):
+            old_lines = _apply_hunk(old_lines, hunk)
+
+        return "".join(old_lines)
+
+
+def _parse_unified_diff(diff_text: str) -> list[dict]:
+    """Parse a unified diff string into a list of hunk dicts.
+
+    Each hunk dict has:
+    - ``old_start``: 1-indexed start line in the old text
+    - ``old_count``: number of old lines
+    - ``lines``: list of (tag, text) tuples where tag is ' ', '+', or '-'
+    """
+    hunks: list[dict] = []
+    lines = diff_text.splitlines(keepends=True)
+    i = 0
+
+    # Skip file headers (--- / +++ / diff --git lines)
+    while i < len(lines):
+        stripped = lines[i].rstrip()
+        if stripped.startswith("@@"):
+            break
+        i += 1
+
+    while i < len(lines):
+        line = lines[i]
+        if not line.rstrip().startswith("@@"):
+            i += 1
+            continue
+
+        # Parse @@ header: @@ -old_start,old_count +new_start,new_count @@
+        m = re.match(r"@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@", line.rstrip())
+        if not m:
+            i += 1
+            continue
+
+        old_start = int(m.group(1))
+        hunk_lines: list[tuple[str, str]] = []
+        i += 1
+
+        while i < len(lines):
+            hl = lines[i]
+            if hl.startswith("@@") or hl.startswith("diff --git") or hl.startswith("---"):
+                break
+            if hl.startswith("-"):
+                hunk_lines.append(("-", hl[1:]))
+            elif hl.startswith("+"):
+                hunk_lines.append(("+", hl[1:]))
+            elif hl.startswith(" "):
+                hunk_lines.append((" ", hl[1:]))
+            elif hl.startswith("\\"):
+                # "\ No newline at end of file" — skip
+                pass
+            else:
+                # Bare line with no prefix — treat as context
+                hunk_lines.append((" ", hl))
+            i += 1
+
+        hunks.append({"old_start": old_start, "lines": hunk_lines})
+
+    return hunks
+
+
+def _apply_hunk(old_lines: list[str], hunk: dict) -> list[str]:
+    """Apply a single hunk to a list of lines.
+
+    Uses strict context matching: context and removal lines must match
+    exactly (modulo trailing newline).
+    """
+    from pluckit.types import PluckerError
+
+    # old_start is 1-indexed
+    pos = hunk["old_start"] - 1
+    result = list(old_lines[:pos])
+
+    check_pos = pos
+    for tag, text in hunk["lines"]:
+        if tag == " ":
+            # Context line — verify match
+            if check_pos >= len(old_lines):
+                raise PluckerError(
+                    f"Patch context mismatch: expected line {check_pos + 1} "
+                    f"but file has only {len(old_lines)} lines"
+                )
+            actual = old_lines[check_pos]
+            if actual.rstrip("\n") != text.rstrip("\n"):
+                raise PluckerError(
+                    f"Patch context mismatch at line {check_pos + 1}: "
+                    f"expected {text.rstrip()!r}, got {actual.rstrip()!r}"
+                )
+            result.append(actual)
+            check_pos += 1
+        elif tag == "-":
+            # Removal — verify match then skip
+            if check_pos >= len(old_lines):
+                raise PluckerError(
+                    f"Patch removal mismatch: expected line {check_pos + 1} "
+                    f"but file has only {len(old_lines)} lines"
+                )
+            actual = old_lines[check_pos]
+            if actual.rstrip("\n") != text.rstrip("\n"):
+                raise PluckerError(
+                    f"Patch removal mismatch at line {check_pos + 1}: "
+                    f"expected {text.rstrip()!r}, got {actual.rstrip()!r}"
+                )
+            check_pos += 1
+        elif tag == "+":
+            # Addition — insert
+            # Ensure trailing newline for consistency
+            if not text.endswith("\n"):
+                text = text + "\n"
+            result.append(text)
+
+    # Append remaining lines after the hunk
+    result.extend(old_lines[check_pos:])
+    return result
+
+
+# ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
 

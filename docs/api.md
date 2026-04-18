@@ -168,6 +168,7 @@ and multiple fluent mutations are independent transactions.
 | `rename(new_name)`                       | Rename the first name occurrence                 |
 | `clearBody()`                            | Replace body with `pass` / `{}`                  |
 | `remove()`                               | Delete the matched node                          |
+| `patch(content)`                         | Apply a unified diff or raw replacement          |
 
 Example:
 
@@ -177,7 +178,19 @@ pluck.find(".fn#validate_token").replaceWith(
     "raise ValueError('token required')",
 )
 pluck.find(".fn:exported").addParam("timeout: int = 30")
+
+# Apply a unified diff
+diff_content = open("refactor.patch").read()
+pluck.find(".fn#handler").patch(diff_content)
+
+# Apply raw replacement text (like replaceWith, but from external content)
+new_code = open("patches/new_handler.py").read()
+pluck.find(".fn#handler").patch(new_code)
 ```
+
+`patch(content)` auto-detects unified diffs (by leading `---` or
+`diff --git`) vs raw replacement text. For diffs, context lines must
+match exactly or a `PluckerError` is raised.
 
 ### Reading matched source
 
@@ -384,6 +397,8 @@ chain = Chain(
 | `source`  | `list[str]`       | File paths or glob patterns              |
 | `steps`   | `list[ChainStep]` | Ordered list of operations               |
 | `plugins` | `list[str]`       | Plugin names to load (default: `[]`)     |
+| `dry_run` | `bool`            | Preview changes without writing (default: `False`) |
+| `diff`    | `bool`            | Output mutations as unified diff (default: `False`) |
 
 ### Construction methods
 

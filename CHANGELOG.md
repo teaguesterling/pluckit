@@ -6,6 +6,34 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.12.0] — 2026-04-18
+
+### Added
+
+- **`--diff` flag** — preview mutations as unified diff output without
+  writing files. Works like `--dry-run` but outputs the actual diff to
+  stdout, pipeable to `patch`, `git apply`, or pluckit's own `patch` op.
+  `--diff` takes precedence when combined with `--dry-run`.
+- **`patch` mutation** — apply a unified diff or raw replacement text to
+  matched nodes. Auto-detects unified diffs (by `---` / `diff --git`
+  prefix); everything else is treated as raw replacement. Strict context
+  matching in v1 — hunks must match exactly or `PluckerError` is raised.
+  Registered as a chain op (`Selection.patch(content)`).
+- **`@file` argument syntax** — any string argument in a chain step can
+  reference a file with `@path`. The file's content replaces the argument
+  at evaluation time. `@@path` escapes to literal `@path`. In JSON,
+  `{"file": "path"}` is an alternative to `"@path"`. Resolution is
+  relative to CWD and happens at eval time, keeping serialized chains
+  portable.
+
+### Fixed
+
+- **`--dry-run` now works.** The flag was parsed into `Chain.dry_run`
+  but never checked during `evaluate()`. Mutations now run, roll back,
+  and report `{"applied": False, "dry_run": True}`.
+- **`--diff` and `--dry-run` can appear after steps** in the CLI, not
+  just before the source. Both positions are supported.
+
 ## [0.11.1] — 2026-04-14
 
 ### Changed

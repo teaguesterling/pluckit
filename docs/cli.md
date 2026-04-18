@@ -123,6 +123,7 @@ When any pagination op appears in a chain, the result JSON gains
 | `clearBody`      |                    | Replace body with `pass` / `{}`        |
 | `replaceWith`    | `TEXT`             | Replace the entire matched node        |
 | `replace`        | `OLD NEW`          | String-level replace within the node   |
+| `patch`          | `CONTENT`          | Apply a unified diff or replacement    |
 
 ### Plugin operations
 
@@ -144,6 +145,37 @@ When any pagination op appears in a chain, the result JSON gains
 
 ---
 
+## `@file` Argument Syntax
+
+Any string argument in a chain step can reference a file with the `@path`
+prefix. The file's content replaces the argument at evaluation time:
+
+```bash
+# Read replacement code from a file
+pluckit src/**/*.py find ".fn#handler" replaceWith @patches/new_handler.py
+
+# Apply a patch file
+pluckit src/**/*.py find ".fn#handler" patch @refactor.patch
+
+# Escape: literal @path (no file read)
+pluckit src/**/*.py find ".fn#handler" replaceWith @@not_a_file
+```
+
+In JSON, the same convention applies as a string `"@path"` or an
+explicit object `{"file": "path"}`:
+
+```json
+{"op": "replaceWith", "args": ["@patches/new_handler.py"]}
+{"op": "replaceWith", "args": [{"file": "patches/new_handler.py"}]}
+```
+
+Paths resolve relative to the current working directory. The `@path`
+reference stays as-is in serialized chains (`to_dict` / `to_json` /
+`to_argv`) — resolution happens only at `evaluate()` time, keeping
+chains portable.
+
+---
+
 ## Global Flags
 
 | Flag                  | Description                                           |
@@ -151,6 +183,7 @@ When any pagination op appears in a chain, the result JSON gains
 | `--plugin NAME`       | Load a named plugin                                   |
 | `--repo DIR`          | Repository root for relative paths (default: cwd)     |
 | `--dry-run`, `-n`     | Show what would change without writing                 |
+| `--diff`              | Output mutations as unified diff (no file writes)      |
 | `--json JSON`         | Run a chain from a JSON string (see [JSON I/O](#json-io)) |
 | `--to-json`           | Print the chain as JSON instead of executing it        |
 | `--version`           | Print version and exit                                 |
@@ -170,10 +203,12 @@ The terminal operation you choose determines the output format:
 | `view`         | Rendered markdown (requires `AstViewer` plugin)         |
 | `materialize`  | JSON array of matched nodes                             |
 | mutations      | A summary line printed to stderr                        |
+| `--diff`       | Unified diff of what mutations would change (stdout)    |
 
-When `--dry-run` is active, mutation operations print a unified diff to
-stdout and a summary to stderr. Pipe the diff into `patch` or
-`git apply` to stage changes manually.
+`--dry-run` prevents file writes and reports a summary to stderr.
+`--diff` also prevents file writes, but outputs a unified diff to
+stdout that can be piped to `patch`, `git apply`, or pluckit's own
+`patch` operation. When both are set, `--diff` takes precedence.
 
 ---
 
@@ -320,6 +355,16 @@ pluckit src/**/*.py find ".fn" complexity
 
 # JSON round-trip
 pluckit --to-json src/**/*.py find ".fn:exported" count | pluckit --json "$(cat -)"
+
+# Preview a rename as a unified diff
+pluckit src/**/*.py find ".fn#old_api" rename "new_api" --diff
+
+# Save diff to file, then apply
+pluckit src/**/*.py find ".fn#old_api" rename "new_api" --diff > refactor.patch
+pluckit src/**/*.py find ".fn#old_api" patch @refactor.patch
+
+# Replace a function body from a file
+pluckit src/api.py find ".fn#handler" replaceWith @patches/new_handler.py
 ```
 
 ---
