@@ -2,16 +2,21 @@
 from pluckit.cache import ASTCache
 from pluckit.chain import Chain, ChainStep
 from pluckit.config import PluckitConfig
+from pluckit.doc_selection import DocSelection
+from pluckit.fn import _ModuleFnAccessor
 from pluckit.isolated import Isolated
 from pluckit.plucker import Plucker
 from pluckit.pluckins.base import Pluckin, PluckinRegistry, Plugin, PluginRegistry
 from pluckit.pluckins.calls import Calls
 from pluckit.pluckins.history import Commit, History
 from pluckit.pluckins.scope import Scope
+from pluckit.pluckins.search import Search
 from pluckit.pluckins.viewer import AstViewer, View, ViewBlock
 from pluckit.selection import Selection
 from pluckit.selector import Selector
 from pluckit.types import DiffResult, InterfaceInfo, NodeInfo, PluckerError
+
+fn = _ModuleFnAccessor()
 
 
 def view(query: str, *, code: str = "**/*", format: str = "markdown") -> View:
@@ -62,6 +67,34 @@ def find(
     ]
 
 
+def search(
+    query: str,
+    *,
+    code: str = "**/*",
+    kind: str | None = None,
+    repo: str | None = None,
+) -> list[tuple[str, int, str]]:
+    """Module-level convenience: BM25 full-text search returning match locations.
+
+    Requires fledgling with an FTS index. Returns a list of
+    ``(file_path, start_line, name)`` tuples ranked by BM25 score.
+    For the full Selection API, use ``Plucker.search`` instead::
+
+        from pluckit import Plucker, Search
+        pluck = Plucker(code="src/**/*.py", plugins=[Search])
+        pluck.rebuild_fts()
+        sel = pluck.search("authentication")
+        print(sel.count(), sel.names())
+    """
+    pluck = Plucker(code=code, plugins=[Search], repo=repo)
+    selection = pluck.search(query, kind=kind)
+    rows = selection.materialize()
+    return [
+        (row["file_path"], row["start_line"], row.get("name") or row.get("type", ""))
+        for row in rows
+    ]
+
+
 __all__ = [
     # Core
     "Plucker",
@@ -84,6 +117,7 @@ __all__ = [
     "Commit",
     "Calls",
     "Scope",
+    "Search",
     # View result types
     "View",
     "ViewBlock",
@@ -92,7 +126,11 @@ __all__ = [
     "DiffResult",
     "InterfaceInfo",
     "Isolated",
+    # Doc selection
+    "DocSelection",
     # Module-level shortcuts
+    "fn",
     "view",
     "find",
+    "search",
 ]

@@ -4,6 +4,7 @@ from typing import TYPE_CHECKING
 
 from pluckit._context import _Context
 from pluckit._sql import _esc, _selector_to_where, ast_select_sql
+from pluckit.doc_selection import DocSelection
 from pluckit.pluckins.base import Pluckin, PluckinRegistry
 from pluckit.types import PluckerError
 
@@ -20,6 +21,7 @@ class Plucker:
 
     Args:
         code: Default source — glob pattern, file path, or DuckDB table/view name.
+        docs: Default docs source — glob pattern for markdown files.
         plugins: Pluckin classes or instances to register.
         repo: Repository root (defaults to cwd). Globs resolve relative to this.
         db: Existing DuckDB connection to reuse.
@@ -33,6 +35,7 @@ class Plucker:
         self,
         code: str | None = None,
         *,
+        docs: str | None = None,
         plugins: list[type[Pluckin] | Pluckin] | None = None,
         repo: str | None = None,
         db: duckdb.DuckDBPyConnection | None = None,
@@ -58,6 +61,7 @@ class Plucker:
         )
         self._registry = PluckinRegistry()
         self._code_source = code
+        self._docs_source = docs
 
         self._cache = None
         if cache:
@@ -78,6 +82,42 @@ class Plucker:
         is a bare :class:`duckdb.DuckDBPyConnection`.
         """
         return self._ctx.db
+
+    @property
+    def fn(self):
+        """Direct access to fledgling macro functions.
+
+        Exposes every fledgling macro as a callable. Globs and
+        parameters are always passed explicitly::
+
+            pluck.fn.doc_outline("docs/**/*.md")
+            pluck.fn.search_code("src/**/*.py", "auth")
+            pluck.fn.find_definitions("src/**/*.py")
+        """
+        from pluckit.fn import FnAccessor
+        return FnAccessor(self._ctx.db)
+
+    def docs(self) -> DocSelection:
+        """Query the configured docs source.
+
+        Returns a :class:`DocSelection` backed by
+        ``read_markdown_sections`` over the glob passed to
+        ``Plucker(docs=...)``.
+        """
+        if self._docs_source is None:
+            raise PluckerError(
+                "No docs source configured. "
+                "Use Plucker(docs='**/*.md') or Plucker(docs='docs/**/*.md')"
+            )
+        import os
+        glob = self._docs_source
+        if not os.path.isabs(glob):
+            glob = os.path.join(self._ctx.repo, glob)
+        rel = self._ctx.db.sql(
+            f"SELECT * FROM read_markdown_sections("
+            f"'{_esc(glob)}', include_content := true, include_filepath := true)"
+        )
+        return DocSelection(rel, self._ctx, docs_glob=self._docs_source)
 
     def find(self, selector: str) -> Selection:
         """Query the configured code source."""
@@ -138,6 +178,8 @@ class Plucker:
         d: dict = {}
         if self._code_source:
             d["code"] = self._code_source
+        if self._docs_source:
+            d["docs"] = self._docs_source
         # Extract unique plugin names from registered plugins
         plugin_names: list[str] = []
         seen: set[int] = set()
@@ -162,6 +204,7 @@ class Plucker:
         plugin_classes = resolve_plugins(data.get("plugins", []))
         return cls(
             code=data.get("code"),
+            docs=data.get("docs"),
             plugins=plugin_classes,
             repo=data.get("repo"),
         )
@@ -187,6 +230,8 @@ class Plucker:
             tokens.extend(["--plugin", p])
         if d.get("repo"):
             tokens.extend(["--repo", d["repo"]])
+        if d.get("docs"):
+            tokens.extend(["--docs", d["docs"]])
         if d.get("code"):
             tokens.append(d["code"])
         return tokens
@@ -202,6 +247,7 @@ class Plucker:
 
         plugins: list[str] = []
         repo: str | None = None
+        docs: str | None = None
         code: str | None = None
         i = 0
         n = len(tokens)
@@ -221,12 +267,20 @@ class Plucker:
                     continue
                 i += 1
                 continue
+            if tok == "--docs":
+                if i + 1 < n:
+                    docs = tokens[i + 1]
+                    i += 2
+                    continue
+                i += 1
+                continue
             # First non-flag token is the source
             if not tok.startswith("-") and code is None:
                 code = tok
             i += 1
         return cls(
             code=code,
+            docs=docs,
             plugins=resolve_plugins(plugins),
             repo=repo,
         )
