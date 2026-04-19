@@ -90,7 +90,7 @@ class Scope(Pluckin):
         match has ``scope.current = X`` and another node shares the same value.
 
         In practice, we take the match to *be* the scope: we gather
-        definitions whose ``scope_id`` equals the match's ``node_id``. This
+        definitions whose ``scope.current`` equals the match's ``node_id``. This
         matches what users usually want when they write
         ``pluck.find(".fn#outer").defs()`` — names defined inside ``outer``.
         """

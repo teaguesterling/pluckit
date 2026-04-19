@@ -230,6 +230,8 @@ class Plucker:
             tokens.extend(["--plugin", p])
         if d.get("repo"):
             tokens.extend(["--repo", d["repo"]])
+        if d.get("docs"):
+            tokens.extend(["--docs", d["docs"]])
         if d.get("code"):
             tokens.append(d["code"])
         return tokens
@@ -245,6 +247,7 @@ class Plucker:
 
         plugins: list[str] = []
         repo: str | None = None
+        docs: str | None = None
         code: str | None = None
         i = 0
         n = len(tokens)
@@ -264,12 +267,20 @@ class Plucker:
                     continue
                 i += 1
                 continue
+            if tok == "--docs":
+                if i + 1 < n:
+                    docs = tokens[i + 1]
+                    i += 2
+                    continue
+                i += 1
+                continue
             # First non-flag token is the source
             if not tok.startswith("-") and code is None:
                 code = tok
             i += 1
         return cls(
             code=code,
+            docs=docs,
             plugins=resolve_plugins(plugins),
             repo=repo,
         )

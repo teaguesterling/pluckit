@@ -19,10 +19,13 @@ Usage::
 """
 from __future__ import annotations
 
+import itertools
 from typing import TYPE_CHECKING, Any
 
 from pluckit._sql import _esc
 from pluckit.types import PluckerError
+
+_view_counter = itertools.count()
 
 if TYPE_CHECKING:
     import duckdb
@@ -93,15 +96,28 @@ class DocSelection:
         """BM25 full-text search over sections.
 
         Requires fledgling with an FTS index (call ``rebuild_fts()``
-        first). Returns a DocSelection ranked by BM25 score.
+        first). Returns a DocSelection ranked by BM25 score,
+        restricted to sections in the current chain.
         """
         db = self._ctx.db
-        if not hasattr(db, "search_docs"):
+        esc_query = _esc(query)
+        cur_view = f"_docsearch_{next(_view_counter)}"
+        try:
+            self._rel.create_view(cur_view, replace=True)
+            result = db.sql(
+                f"SELECT d.* FROM {cur_view} d "
+                f"JOIN fts.content c "
+                f"  ON c.file_path = d.file_path AND c.start_line = d.start_line "
+                f"WHERE fts_fts_content.match_bm25(c.id, '{esc_query}') IS NOT NULL "
+                f"  AND c.kind = 'doc_section' "
+                f"ORDER BY fts_fts_content.match_bm25(c.id, '{esc_query}') DESC "
+                f"LIMIT {int(limit)}"
+            )
+        except Exception:
             raise PluckerError(
                 "DocSelection.search() requires fledgling with FTS. "
                 "Install fledgling-mcp and call rebuild_fts() first."
             )
-        result = db.search_docs(query, limit_n=limit)
         return self._new(result)
 
     # ------------------------------------------------------------------
