@@ -13,7 +13,7 @@ if TYPE_CHECKING:
 
 
 _DEFAULT_MODULES = [
-    "sandbox", "source", "code", "docs", "repo", "structural", "workflows",
+    "sandbox", "source", "code", "docs", "repo", "structural", "workflows", "fts",
 ]
 
 

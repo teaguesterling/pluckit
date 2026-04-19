@@ -19,6 +19,7 @@ _KNOWN_PROVIDERS: dict[str, str] = {
     "interface": "Scope", "refs": "Scope", "defs": "Scope",
     "scope": "Scope", "shadows": "Scope", "unused_params": "Scope",
     "view": "AstViewer",
+    "search": "Search", "rebuild_fts": "Search",
 }
 
 _PLUCKIN_MAP: dict[str, str] = {
@@ -26,6 +27,7 @@ _PLUCKIN_MAP: dict[str, str] = {
     "History": "pluckit.pluckins.history:History",
     "Calls": "pluckit.pluckins.calls:Calls",
     "Scope": "pluckit.pluckins.scope:Scope",
+    "Search": "pluckit.pluckins.search:Search",
 }
 
 
