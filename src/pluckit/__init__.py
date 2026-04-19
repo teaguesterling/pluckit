@@ -2,6 +2,8 @@
 from pluckit.cache import ASTCache
 from pluckit.chain import Chain, ChainStep
 from pluckit.config import PluckitConfig
+from pluckit.doc_selection import DocSelection
+from pluckit.fn import _ModuleFnAccessor
 from pluckit.isolated import Isolated
 from pluckit.plucker import Plucker
 from pluckit.pluckins.base import Pluckin, PluckinRegistry, Plugin, PluginRegistry
@@ -13,6 +15,8 @@ from pluckit.pluckins.viewer import AstViewer, View, ViewBlock
 from pluckit.selection import Selection
 from pluckit.selector import Selector
 from pluckit.types import DiffResult, InterfaceInfo, NodeInfo, PluckerError
+
+fn = _ModuleFnAccessor()
 
 
 def view(query: str, *, code: str = "**/*", format: str = "markdown") -> View:
@@ -122,7 +126,10 @@ __all__ = [
     "DiffResult",
     "InterfaceInfo",
     "Isolated",
+    # Doc selection
+    "DocSelection",
     # Module-level shortcuts
+    "fn",
     "view",
     "find",
     "search",
