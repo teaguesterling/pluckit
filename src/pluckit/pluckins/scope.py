@@ -9,7 +9,7 @@ Exposes three methods on ``Selection`` when this plugin is loaded:
 ``scope()`` wraps sitting_duck's ``::scope`` pseudo-element on ``ast_select``
 the same way :class:`~pluckit.pluckins.calls.Calls` wraps ``::callers`` /
 ``::callees``. ``defs()`` and ``refs()`` issue direct ``read_ast`` queries
-joined on ``scope_id`` — sitting_duck's per-node scope column.
+joined on ``scope.current`` — sitting_duck's per-node scope STRUCT field.
 
 Semantics of the low-level flags are taken from sitting_duck's
 ``KINDS.md``:
@@ -85,9 +85,9 @@ class Scope(Pluckin):
     def defs(self, selection: Selection) -> Selection:
         """Return a new Selection of definitions inside the enclosing scope of each match.
 
-        A node is "in the enclosing scope" when its ``scope_id`` equals the
-        match's ``node_id`` (the match itself is a scope) or when the match
-        has ``scope_id = X`` and another node shares the same ``scope_id``.
+        A node is "in the enclosing scope" when its ``scope.current`` equals
+        the match's ``node_id`` (the match itself is a scope) or when the
+        match has ``scope.current = X`` and another node shares the same value.
 
         In practice, we take the match to *be* the scope: we gather
         definitions whose ``scope_id`` equals the match's ``node_id``. This
@@ -127,8 +127,8 @@ class Scope(Pluckin):
         """Build a ``read_ast`` query per (file, match_node_id), filtering by predicate.
 
         Treats each matched node as defining a scope: returns nodes whose
-        ``scope_id`` equals the match's ``node_id`` and whose flags match
-        ``flag_predicate``.
+        ``scope.current`` equals the match's ``node_id`` and whose flags
+        match ``flag_predicate``.
         """
         view = selection._register("scope")
         try:
@@ -150,7 +150,7 @@ class Scope(Pluckin):
             esc_f = _esc(file_path)
             unions.append(
                 f"SELECT * FROM read_ast('{esc_f}') "
-                f"WHERE scope_id = {int(node_id)} AND {flag_predicate}"
+                f"WHERE scope.current = {int(node_id)} AND {flag_predicate}"
             )
         rel = selection._ctx.db.sql(" UNION ALL ".join(unions))
         return selection._new(rel, op=(op_name, (), {}))
