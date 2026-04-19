@@ -1,9 +1,12 @@
 """Search pluckin — BM25 full-text search via fledgling's FTS index.
 
-Exposes two methods:
+Exposes methods on both **Plucker** and **Selection**:
 
 - ``search(query)`` on **Selection** — BM25-rank current nodes by relevance
-- ``search(query)`` on **Plucker** — top-level text search returning a Selection
+- ``search(query)`` on **Plucker** — code search returning a Selection
+- ``search_docs(query)`` on **Plucker** — BM25 over markdown sections
+- ``search_code(query)`` on **Plucker** — BM25 over code chunks
+- ``rebuild_fts()`` on **Plucker** — rebuild the FTS index
 
 Requires fledgling with the ``fts`` module loaded and ``rebuild_fts()``
 called at least once. Without fledgling, raises a clear error at call
@@ -50,6 +53,8 @@ class Search(Pluckin):
     name = "Search"
     methods = {
         "search": "search",
+        "search_docs": "search_docs",
+        "search_code": "search_code",
         "rebuild_fts": "rebuild_fts",
     }
 
@@ -81,20 +86,38 @@ class Search(Pluckin):
         else:
             raise PluckerError(f"search() called on unexpected type: {type(target)}")
 
+    def search_docs(self, target: Plucker, query: str, *, limit: int = 20):
+        """BM25 search over markdown sections.
+
+        Returns a DuckDB relation with columns: file_path, name (heading),
+        score, text, and FTS metadata. Delegates to fledgling's
+        ``search_docs`` macro.
+        """
+        con = _fledgling_connection(target)
+        _assert_fts_index(con)
+        return con.search_docs(query, limit_n=limit)
+
+    def search_code(self, target: Plucker, query: str, *, kind: str | None = None, limit: int = 20):
+        """BM25 search over code chunks (definitions, comments, strings).
+
+        Returns a DuckDB relation with columns: file_path, name, kind,
+        score, text, and FTS metadata. Delegates to fledgling's
+        ``search_code`` macro.
+        """
+        con = _fledgling_connection(target)
+        _assert_fts_index(con)
+        kwargs = {"limit_n": limit}
+        if kind is not None:
+            kwargs["filter_kind"] = kind
+        return con.search_code(query, **kwargs)
+
     def rebuild_fts(self, target: Plucker, *, docs_glob: str = "**/*.md", code_glob: str = "**/*.py") -> None:
         """Rebuild the FTS index.
 
-        Delegates to ``fledgling.Connection.rebuild_fts()`` if available,
-        otherwise runs the rebuild SQL script directly.
+        Delegates to ``fledgling.Connection.rebuild_fts()``.
         """
-        con = target.connection
-        if hasattr(con, "rebuild_fts"):
-            con.rebuild_fts(docs_glob=docs_glob, code_glob=code_glob)
-        else:
-            raise PluckerError(
-                "rebuild_fts() requires fledgling. "
-                "Install with: pip install fledgling-mcp"
-            )
+        con = _fledgling_connection(target)
+        con.rebuild_fts(docs_glob=docs_glob, code_glob=code_glob)
 
     # ------------------------------------------------------------------
     # Internals
@@ -173,10 +196,23 @@ class Search(Pluckin):
         return selection._new(rel, op=("search", (query,), {"kind": kind}))
 
 
+def _fledgling_connection(target):
+    """Extract the fledgling Connection from a Plucker, or raise."""
+    con = target.connection
+    if not hasattr(con, "rebuild_fts"):
+        raise PluckerError(
+            "FTS search requires fledgling. "
+            "Install with: pip install fledgling-mcp"
+        )
+    return con
+
+
 def _assert_fts_index(db) -> None:
     """Check that fts.content exists and has rows."""
+    execute = getattr(db, "execute", None) or getattr(db, "sql", None)
     try:
-        count = db.sql("SELECT count(*) FROM fts.content").fetchone()[0]
+        result = execute("SELECT count(*) FROM fts.content")
+        count = result.fetchone()[0]
     except Exception:
         raise PluckerError(
             "FTS index not found. Ensure fledgling is loaded with the 'fts' module "

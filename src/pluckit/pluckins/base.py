@@ -19,7 +19,8 @@ _KNOWN_PROVIDERS: dict[str, str] = {
     "interface": "Scope", "refs": "Scope", "defs": "Scope",
     "scope": "Scope", "shadows": "Scope", "unused_params": "Scope",
     "view": "AstViewer",
-    "search": "Search", "rebuild_fts": "Search",
+    "search": "Search", "search_docs": "Search",
+    "search_code": "Search", "rebuild_fts": "Search",
 }
 
 _PLUCKIN_MAP: dict[str, str] = {

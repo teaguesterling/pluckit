@@ -146,6 +146,37 @@ class TestSearchSelection:
 
 
 @requires_fledgling
+class TestSearchDocs:
+    def test_returns_results(self, pluck_with_fts):
+        result = pluck_with_fts.search_docs("authentication")
+        rows = result.fetchall()
+        assert len(rows) > 0
+
+    def test_results_have_heading_names(self, pluck_with_fts):
+        result = pluck_with_fts.search_docs("token validation")
+        rows = result.fetchall()
+        assert len(rows) > 0
+
+    def test_limit_respected(self, pluck_with_fts):
+        result = pluck_with_fts.search_docs("database", limit=2)
+        rows = result.fetchall()
+        assert len(rows) <= 2
+
+
+@requires_fledgling
+class TestSearchCodeMethod:
+    def test_returns_results(self, pluck_with_fts):
+        result = pluck_with_fts.search_code("authenticate")
+        rows = result.fetchall()
+        assert len(rows) > 0
+
+    def test_kind_filter(self, pluck_with_fts):
+        result = pluck_with_fts.search_code("credentials", kind="string")
+        rows = result.fetchall()
+        assert len(rows) > 0
+
+
+@requires_fledgling
 class TestRebuildFts:
     def test_rebuild_populates_index(self, pluck_with_fts):
         count = pluck_with_fts.connection.execute(
@@ -167,4 +198,6 @@ class TestSearchWithoutFledgling:
     def test_plugin_registration(self):
         from pluckit.pluckins.base import _KNOWN_PROVIDERS, _PLUCKIN_MAP
         assert _KNOWN_PROVIDERS["search"] == "Search"
+        assert _KNOWN_PROVIDERS["search_docs"] == "Search"
+        assert _KNOWN_PROVIDERS["search_code"] == "Search"
         assert "Search" in _PLUCKIN_MAP
