@@ -6,7 +6,22 @@ import textwrap
 import pytest
 
 from pluckit import DocSelection, Plucker
+from pluckit.pluckins.search import Search
 from pluckit.types import PluckerError
+
+
+def _fledgling_available():
+    try:
+        import fledgling
+        return True
+    except ImportError:
+        return False
+
+
+requires_fledgling = pytest.mark.skipif(
+    not _fledgling_available(),
+    reason="fledgling not installed",
+)
 
 
 SAMPLE_DOCS = textwrap.dedent("""\
@@ -166,6 +181,43 @@ class TestDocSelectionFilter:
         files = guide_only.files()
         assert len(files) == 1
         assert "guide.md" in files[0]
+
+
+@requires_fledgling
+class TestDocSelectionSearch:
+    @pytest.fixture
+    def pluck_fts_docs(self, docs_dir):
+        src = docs_dir / "src"
+        src.mkdir(exist_ok=True)
+        (src / "stub.py").write_text("def stub(): pass\n")
+        p = Plucker(
+            code=str(docs_dir / "src/**/*.py"),
+            docs=str(docs_dir / "docs/**/*.md"),
+            plugins=[Search],
+            repo=str(docs_dir),
+        )
+        if not p._ctx._fledgling_loaded:
+            pytest.skip("fledgling not loaded")
+        p.rebuild_fts(
+            docs_glob=str(docs_dir / "docs/**/*.md"),
+            code_glob=str(docs_dir / "src/**/*.py"),
+        )
+        return p
+
+    def test_search_returns_doc_selection(self, pluck_fts_docs):
+        result = pluck_fts_docs.docs().search("authentication")
+        assert isinstance(result, DocSelection)
+        assert result.count() > 0
+
+    def test_search_respects_filter_chain(self, pluck_fts_docs):
+        all_results = pluck_fts_docs.docs().search("database")
+        filtered = pluck_fts_docs.docs().filter(file_path="guide").search("database")
+        guide_files = filtered.files()
+        assert all("guide" in f for f in guide_files)
+
+    def test_search_no_match(self, pluck_fts_docs):
+        result = pluck_fts_docs.docs().search("zzzznonexistentzzzz")
+        assert result.count() == 0
 
 
 class TestDocsSerialization:

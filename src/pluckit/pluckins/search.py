@@ -127,24 +127,28 @@ class Search(Pluckin):
         """Top-level BM25 search — returns code nodes ranked by score."""
         from pluckit.selection import Selection
 
-        db = plucker._ctx.db
+        con = _fledgling_connection(plucker)
+        db = con
         _assert_fts_index(db)
 
         esc_query = _esc(query)
-        kind_filter = f"AND c.kind = '{_esc(kind)}'" if kind else ""
+        clauses = [
+            f"fts_fts_content.match_bm25(c.id, '{esc_query}') IS NOT NULL",
+            "c.extractor = 'sitting_duck'",
+        ]
+        if kind:
+            clauses.append(f"c.kind = '{_esc(kind)}'")
 
         hits = db.sql(
             f"SELECT c.file_path, c.ordinal AS node_id, "
             f"  fts_fts_content.match_bm25(c.id, '{esc_query}') AS score "
             f"FROM fts.content c "
-            f"WHERE fts_fts_content.match_bm25(c.id, '{esc_query}') IS NOT NULL "
-            f"  AND c.extractor = 'sitting_duck' "
-            f"  {kind_filter} "
+            f"WHERE {' AND '.join(clauses)} "
             f"ORDER BY score DESC LIMIT {int(limit)}"
         ).fetchall()
 
         if not hits:
-            rel = db.sql("SELECT * FROM read_ast('/dev/null') WHERE 1=0")
+            rel = db.sql("SELECT * FROM read_ast('__nonexistent__') WHERE 1=0")
             return Selection(rel, plucker._ctx, plucker._registry, _op=("search", (query,), {"kind": kind}))
 
         files = sorted(set(h[0] for h in hits))
@@ -171,7 +175,11 @@ class Search(Pluckin):
 
         view = selection._register("search")
         esc_query = _esc(query)
-        kind_filter = f"AND c.kind = '{_esc(kind)}'" if kind else ""
+        clauses = [
+            f"fts_fts_content.match_bm25(c.id, '{esc_query}') IS NOT NULL",
+        ]
+        if kind:
+            clauses.append(f"c.kind = '{_esc(kind)}'")
 
         try:
             sql = (
@@ -180,8 +188,7 @@ class Search(Pluckin):
                 f"FROM {view} s "
                 f"JOIN fts.content c "
                 f"  ON c.file_path = s.file_path AND c.ordinal = s.node_id "
-                f"WHERE fts_fts_content.match_bm25(c.id, '{esc_query}') IS NOT NULL "
-                f"  {kind_filter} "
+                f"WHERE {' AND '.join(clauses)} "
                 f"ORDER BY score DESC "
                 f"LIMIT {int(limit)}"
             )
@@ -209,10 +216,8 @@ def _fledgling_connection(target):
 
 def _assert_fts_index(db) -> None:
     """Check that fts.content exists and has rows."""
-    execute = getattr(db, "execute", None) or getattr(db, "sql", None)
     try:
-        result = execute("SELECT count(*) FROM fts.content")
-        count = result.fetchone()[0]
+        count = db.sql("SELECT count(*) FROM fts.content").fetchone()[0]
     except Exception:
         raise PluckerError(
             "FTS index not found. Ensure fledgling is loaded with the 'fts' module "

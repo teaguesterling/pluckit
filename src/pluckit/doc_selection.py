@@ -101,23 +101,51 @@ class DocSelection:
         """
         db = self._ctx.db
         esc_query = _esc(query)
-        cur_view = f"_docsearch_{next(_view_counter)}"
         try:
-            self._rel.create_view(cur_view, replace=True)
-            result = db.sql(
-                f"SELECT d.* FROM {cur_view} d "
-                f"JOIN fts.content c "
-                f"  ON c.file_path = d.file_path AND c.start_line = d.start_line "
+            current = self._rel.fetchall()
+        except Exception as exc:
+            raise PluckerError(
+                "DocSelection.search() failed to materialize current sections."
+            ) from exc
+        if not current:
+            return self._new(self._rel.limit(0))
+
+        columns = [col[0] for col in self._rel.description]
+        fp_idx = columns.index("file_path")
+        sl_idx = columns.index("start_line")
+        pairs = set((row[fp_idx], row[sl_idx]) for row in current)
+
+        try:
+            fts_hits = db.sql(
+                f"SELECT c.file_path, c.start_line, "
+                f"  fts_fts_content.match_bm25(c.id, '{esc_query}') AS score "
+                f"FROM fts.content c "
                 f"WHERE fts_fts_content.match_bm25(c.id, '{esc_query}') IS NOT NULL "
                 f"  AND c.kind = 'doc_section' "
-                f"ORDER BY fts_fts_content.match_bm25(c.id, '{esc_query}') DESC "
-                f"LIMIT {int(limit)}"
-            )
-        except Exception:
+                f"ORDER BY score DESC LIMIT {int(limit)}"
+            ).fetchall()
+        except Exception as exc:
             raise PluckerError(
                 "DocSelection.search() requires fledgling with FTS. "
                 "Install fledgling-mcp and call rebuild_fts() first."
-            )
+            ) from exc
+
+        matched = [h for h in fts_hits if (h[0], h[1]) in pairs]
+        if not matched:
+            return self._new(self._rel.limit(0))
+
+        values = ", ".join(
+            f"('{_esc(h[0])}', {h[1]}, {h[2]})" for h in matched
+        )
+        view_name = f"_docsearch_{next(_view_counter)}"
+        self._rel.create_view(view_name, replace=True)
+        result = db.sql(
+            f"SELECT d.* FROM {view_name} d "
+            f"JOIN (SELECT * FROM (VALUES {values}) "
+            f"  AS t(file_path, start_line, score)) h "
+            f"  ON d.file_path = h.file_path AND d.start_line = h.start_line "
+            f"ORDER BY h.score DESC"
+        )
         return self._new(result)
 
     # ------------------------------------------------------------------

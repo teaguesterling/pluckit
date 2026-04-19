@@ -86,6 +86,10 @@ class _ModuleFnAccessor:
             raise AttributeError(name)
         return getattr(self._ensure(), name)
 
+    def reset(self) -> None:
+        """Discard the cached connection, forcing re-initialization on next access."""
+        self._accessor = None
+
     def __dir__(self):
         return dir(self._ensure())
 

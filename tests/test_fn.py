@@ -64,3 +64,15 @@ class TestModuleLevelFn:
     def test_module_fn_repr(self):
         import pluckit
         assert repr(pluckit.fn) == "pluckit.fn"
+
+    def test_module_fn_reset(self):
+        import pluckit
+        pluckit.fn.reset()
+        assert pluckit.fn._accessor is None
+
+
+class TestModuleLevelSearch:
+    def test_search_without_fts_raises(self, sample_dir):
+        import pluckit
+        with pytest.raises(pluckit.PluckerError):
+            pluckit.search("test", code=str(sample_dir / "src/**/*.py"))
