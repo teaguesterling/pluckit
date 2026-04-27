@@ -72,6 +72,28 @@ print(pluck.view(".fn#main { show: signature; }"))
 Create a `Source` handle for ad-hoc queries against a different glob
 without creating a whole new Plucker.
 
+#### `fts_collection(name: str) -> FtsCollection`
+
+Get a handle to a named FTS collection. Requires fledgling. Returns an
+`FtsCollection` with `.create(query)` and `.search(query)` methods:
+
+```python
+col = pluck.fts_collection("tools")
+col.create("""
+    SELECT 'search' AS id,
+           'full-text BM25 search over code and docs' AS text,
+           map{'kit': 'fledgling'} AS metadata
+""")
+results = col.search("search")
+for id, text, metadata, score in results:
+    print(f"{score:.2f}  {id}: {text}")
+```
+
+Each collection gets its own BM25 index with independent IDF statistics.
+The fixed schema is `(id TEXT, text TEXT, metadata MAP(TEXT, TEXT))`.
+Creating a collection is idempotent — it replaces the existing table and
+index if the collection already exists.
+
 ---
 
 ## `Selector`
