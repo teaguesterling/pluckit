@@ -83,6 +83,22 @@ class Plucker:
         """
         return self._ctx.db
 
+    def fts_collection(self, name: str):
+        """Get a named FTS collection handle.
+
+        Requires fledgling. Returns an object with ``.create(query)``
+        and ``.search(query)`` for building and querying BM25 indexes.
+        """
+        from pluckit.fts import FtsCollection
+        con = self.connection
+        if not hasattr(con, 'create_fts_collection'):
+            from pluckit.types import PluckerError
+            raise PluckerError(
+                "Named FTS collections require fledgling. "
+                "Install with: pip install fledgling-mcp"
+            )
+        return FtsCollection(con, name)
+
     @property
     def fn(self):
         """Direct access to fledgling macro functions.
