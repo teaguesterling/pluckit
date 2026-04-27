@@ -83,3 +83,48 @@ class TestFtsCollection:
         beta_ids = [r[0] for r in beta_results]
         assert "a1" in alpha_ids
         assert "b1" in beta_ids
+
+
+@requires_fledgling
+class TestFtsCollectionIntegration:
+    def test_custom_collection_isolated_from_content(self, pluck_with_fledgling, tmp_path):
+        p = pluck_with_fledgling
+        (tmp_path / "docs").mkdir(exist_ok=True)
+        (tmp_path / "docs" / "readme.md").write_text("# Hello\nSome docs.\n")
+        p.rebuild_fts(
+            docs_glob=str(tmp_path / "docs/**/*.md"),
+            code_glob=str(tmp_path / "src/**/*.py"),
+        )
+        col = p.fts_collection("custom_tools")
+        col.create("""
+            SELECT 'mytool' AS id,
+                   'xylophone_unique_term_not_in_code' AS text,
+                   map{'source': 'test'} AS metadata
+        """)
+        results = col.search("xylophone_unique_term_not_in_code")
+        assert len(results) == 1
+        assert results[0][0] == "mytool"
+
+        default_results = p.connection.execute(
+            "SELECT * FROM search_content('xylophone_unique_term_not_in_code')"
+        ).fetchall()
+        assert len(default_results) == 0
+
+    def test_multiple_collections_different_idf(self, pluck_with_fledgling):
+        p = pluck_with_fledgling
+        col_tools = p.fts_collection("tools_idf")
+        col_tools.create("""
+            SELECT '1' AS id, 'parse json files' AS text, map{} AS metadata
+            UNION ALL SELECT '2', 'send network request', map{}
+            UNION ALL SELECT '3', 'function to validate data', map{}
+        """)
+        col_code = p.fts_collection("code_idf")
+        col_code.create("""
+            SELECT '1' AS id, 'function parse_json returns dict' AS text, map{} AS metadata
+            UNION ALL SELECT '2', 'function send_request returns response', map{}
+            UNION ALL SELECT '3', 'function validate_data checks schema', map{}
+        """)
+        tool_results = col_tools.search("function")
+        code_results = col_code.search("function")
+        assert len(tool_results) >= 1
+        assert len(code_results) >= 1
