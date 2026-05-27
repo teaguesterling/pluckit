@@ -74,14 +74,28 @@ class Plucker:
 
     @property
     def connection(self):
-        """The underlying database connection.
+        """The underlying database connection. **Public API.**
 
         When fledgling is installed, this is a :class:`fledgling.Connection`
-        proxy that exposes auto-generated macro wrappers (e.g.
-        ``plucker.connection.project_overview()``). Without fledgling, it
-        is a bare :class:`duckdb.DuckDBPyConnection`.
+        proxy exposing the stable ``.con`` (raw duckdb), ``.tools``, and
+        ``.ensure_fts()`` accessors plus auto-generated macro wrappers (e.g.
+        ``plucker.connection.project_overview()``). Without fledgling it is a
+        bare :class:`duckdb.DuckDBPyConnection` with none of those — so any
+        consumer that needs ``.con``/``.tools`` (e.g. squackit) must declare a
+        direct dependency on ``fledgling-mcp``.
         """
         return self._ctx.db
+
+    @property
+    def pluckins(self):
+        """The loaded pluckin instances, in registration order. **Public API.**
+
+        Stable accessor for downstream consumers (e.g. squackit) that enumerate
+        pluckins for tool/integration discovery — a pluckin may expose a
+        ``squackit_tools`` attribute that such consumers collect. Use this
+        instead of reaching into the private ``._registry``.
+        """
+        return self._registry.pluckins
 
     def fts_collection(self, name: str):
         """Get a named FTS collection handle.

@@ -6,6 +6,20 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.13.0] — 2026-05-26
+
+### Added (public API — SemVer-stable from here)
+- `Plucker.pluckins` — public accessor for the loaded pluckin instances (in
+  registration order). Lets downstream consumers (e.g. squackit) enumerate
+  pluckins for tool discovery without reaching into the private `._registry`.
+- `Chain.MUTATION_OPS` — public, stable set of mutation operation names
+  (`_MUTATION_OPS` kept as a deprecated internal alias).
+- Documented `Plucker.connection`'s contract: it is a `fledgling.Connection`
+  (exposing `.con` / `.tools` / `.ensure_fts()`) when `fledgling-mcp` is
+  installed, else a bare DuckDB connection — so consumers needing `.con`/`.tools`
+  must declare a direct `fledgling-mcp` dependency.
+- (Includes the `pluckit.pluckins.search` / `.viewer` surface.)
+
 ## [0.12.0] — 2026-04-18
 
 ### Added

@@ -417,6 +417,10 @@ class Chain:
         "insertBefore", "insertAfter", "rename", "prepend", "append",
         "wrap", "unwrap", "remove", "patch",
     })
+    #: Public, SemVer-stable set of mutation operation names. Downstream
+    #: consumers (e.g. squackit) use this to detect mutating chains;
+    #: ``_MUTATION_OPS`` remains as the deprecated internal alias.
+    MUTATION_OPS = _MUTATION_OPS
     _PLUGIN_OPS = frozenset({
         "view", "history", "authors", "at", "diff", "blame",
     })
