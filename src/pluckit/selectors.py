@@ -193,6 +193,23 @@ def resolve_alias(selector_part: str) -> str:
     return canonical + suffix
 
 
+_ALIAS_TOKEN_RE = re.compile(r"\.[a-zA-Z][\w-]*")
+
+
+def resolve_aliases(selector: str) -> str:
+    """Rewrite every shorthand *class* token in a (possibly compound) selector to its
+    canonical sitting_duck semantic-type form — e.g. ``.fn:has(.call#x)`` becomes
+    ``.def-func:has(.call#x)``. Already-canonical tokens, sitting_duck natives, and bare
+    type selectors pass through unchanged.
+
+    This is pluckit's ONLY remaining selector job: ergonomic shorthand on top of
+    sitting_duck's grammar. All real selection (matching, ``:has``/``:not``, pseudo-classes,
+    combinators) is sitting_duck's, via ``ast_select``. Maximal-token matching keeps
+    overlapping aliases safe (``.import-stmt`` resolves as one token, not ``.import``).
+    """
+    return _ALIAS_TOKEN_RE.sub(lambda m: ALIASES.get(m.group(0), m.group(0)), selector)
+
+
 # ---------------------------------------------------------------------------
 # Pseudo-class registry
 # ---------------------------------------------------------------------------

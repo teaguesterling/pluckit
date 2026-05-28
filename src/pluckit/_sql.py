@@ -209,9 +209,11 @@ def ast_select_sql(source: str, selector: str) -> str:
     (``start_column``/``end_column``) so the output schema stays identical to
     ``read_ast`` and downstream consumers are unchanged.
     """
+    from pluckit.selectors import resolve_aliases
+    sel = resolve_aliases(selector)  # .fn → .def-func etc.; sitting_duck owns the rest
     return (
         "SELECT * EXCLUDE (start_column, end_column) "
-        f"FROM ast_select('{_esc(source)}', '{_esc(selector)}')"
+        f"FROM ast_select('{_esc(source)}', '{_esc(sel)}')"
     )
 
 
@@ -220,7 +222,9 @@ def ast_select_from_sql(table: str, selector: str) -> str:
     (a cache table, a user-provided table/view, or a chained selection), via
     sitting_duck's ``ast_select_from``. That macro returns the table's columns as-is
     (already the ``read_ast`` schema), so no EXCLUDE is needed."""
-    return f"SELECT * FROM ast_select_from('{_esc(table)}', '{_esc(selector)}')"
+    from pluckit.selectors import resolve_aliases
+    sel = resolve_aliases(selector)  # .fn → .def-func etc.; sitting_duck owns the rest
+    return f"SELECT * FROM ast_select_from('{_esc(table)}', '{_esc(sel)}')"
 
 
 def read_ast_sql(source: str, **kwargs) -> str:
