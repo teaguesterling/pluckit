@@ -200,12 +200,27 @@ def _selector_to_where(selector: str) -> str:
 
 
 def ast_select_sql(source: str, selector: str) -> str:
-    """Build SQL to select AST nodes matching selector from source files.
+    """Build SQL selecting AST nodes matching ``selector`` from ``source`` files.
 
-    Uses read_ast() with a WHERE clause derived from the selector.
+    Delegates the CSS-selector grammar to sitting_duck's ``ast_select`` macro — the
+    single source of truth (full ``:has`` / ``:not`` / combinator support plus
+    sitting_duck's native pseudo-classes). pluckit no longer compiles selectors itself.
+    The ``EXCLUDE`` drops the two columns ``ast_select`` adds over ``read_ast``
+    (``start_column``/``end_column``) so the output schema stays identical to
+    ``read_ast`` and downstream consumers are unchanged.
     """
-    where = _selector_to_where(selector)
-    return f"SELECT * FROM read_ast('{_esc(source)}') WHERE {where}"
+    return (
+        "SELECT * EXCLUDE (start_column, end_column) "
+        f"FROM ast_select('{_esc(source)}', '{_esc(selector)}')"
+    )
+
+
+def ast_select_from_sql(table: str, selector: str) -> str:
+    """Like :func:`ast_select_sql` but over an already-materialized ``read_ast`` table
+    (a cache table, a user-provided table/view, or a chained selection), via
+    sitting_duck's ``ast_select_from``. That macro returns the table's columns as-is
+    (already the ``read_ast`` schema), so no EXCLUDE is needed."""
+    return f"SELECT * FROM ast_select_from('{_esc(table)}', '{_esc(selector)}')"
 
 
 def read_ast_sql(source: str, **kwargs) -> str:

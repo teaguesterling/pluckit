@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from pluckit._context import _Context
-from pluckit._sql import _esc, _selector_to_where, ast_select_sql
+from pluckit._sql import _esc, ast_select_from_sql, ast_select_sql
 from pluckit.doc_selection import DocSelection
 from pluckit.pluckins.base import Pluckin, PluckinRegistry
 from pluckit.types import PluckerError
@@ -336,8 +336,7 @@ class Plucker:
                 f"WHERE table_name = '{_esc(source)}'"
             ).fetchone()
             if exists:
-                where = _selector_to_where(selector)
-                return self._ctx.db.sql(f"SELECT * FROM {source} WHERE {where}")
+                return self._ctx.db.sql(ast_select_from_sql(source, selector))
             # Not a table — treat as file, resolve relative to repo
             if not os.path.isabs(resolved):
                 resolved = os.path.join(self._ctx.repo, resolved)
@@ -349,7 +348,6 @@ class Plucker:
         # Cache path: use ASTCache when enabled
         if self._cache is not None:
             table_name = self._cache.get_or_create(resolved)
-            where = _selector_to_where(selector)
-            return self._ctx.db.sql(f"SELECT * FROM {table_name} WHERE {where}")
+            return self._ctx.db.sql(ast_select_from_sql(table_name, selector))
 
         return self._ctx.db.sql(ast_select_sql(resolved, selector))
