@@ -94,6 +94,18 @@ The fixed schema is `(id TEXT, text TEXT, metadata MAP(TEXT, TEXT))`.
 Creating a collection is idempotent — it replaces the existing table and
 index if the collection already exists.
 
+#### `pluckins` (property) `-> list[Pluckin]`
+
+The loaded pluckin instances for this Plucker, in load order. Public since 0.13.0
+(replaces reaching into the private `_registry`). Use it to introspect which plugins
+are active or to pull tool definitions a pluckin contributes:
+
+```python
+for p in pluck.pluckins:
+    print(p.name)
+    # e.g. a pluckin may expose squackit_tools for MCP integration
+```
+
 ---
 
 ## `Selector`
@@ -421,6 +433,22 @@ chain = Chain(
 | `plugins` | `list[str]`       | Plugin names to load (default: `[]`)     |
 | `dry_run` | `bool`            | Preview changes without writing (default: `False`) |
 | `diff`    | `bool`            | Output mutations as unified diff (default: `False`) |
+
+#### `Chain.MUTATION_OPS` (class attribute) `-> frozenset[str]`
+
+The public, stable set of operation names that **mutate** source (public since 0.13.0;
+was `_MUTATION_OPS`). A chain containing any of these is a mutating chain — callers that
+gate writes (e.g. squackit blocks mutations unless `allow_mutations=True`) check membership
+rather than hard-coding the list:
+
+```python
+from pluckit.chain import Chain
+
+is_mutation = any(step.op in Chain.MUTATION_OPS for step in chain.steps)
+```
+
+The set: `wrap`, `unwrap`, `append`, `prepend`, `insertBefore`, `insertAfter`, `replaceWith`,
+`remove`, `rename`, `patch`, `addArg`, `removeArg`, `addParam`, `removeParam`.
 
 ### Construction methods
 
