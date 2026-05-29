@@ -21,11 +21,6 @@ def _esc_like(value: str) -> str:
     return value.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_").replace("'", "''")
 
 
-def _post_filter_where(conditions: list[str]) -> str:
-    """Render pluckit post-filter conditions as a trailing ``WHERE`` clause (or empty)."""
-    return f" WHERE {' AND '.join(conditions)}" if conditions else ""
-
-
 def ast_select_sql(source: str, selector: str) -> str:
     """Build SQL selecting AST nodes matching ``selector`` from ``source`` files.
 
@@ -33,34 +28,52 @@ def ast_select_sql(source: str, selector: str) -> str:
     the single source of truth (classes, types, #ids, [attrs], combinators, ``:has`` /
     ``:not``, and sitting_duck's native pseudo-classes). pluckit's own value-add
     pseudo-classes (``:exported`` / ``:private`` name conventions, ``:contains`` peek
-    substrings, ``:line`` / ``:lines`` / ``:long`` / ``:complex`` thresholds), which
-    sitting_duck cannot express, are split off by :func:`split_post_filters` and applied
-    as a trailing ``WHERE`` over the macro's ``read_ast`` columns. The ``EXCLUDE`` drops the
-    two columns ``ast_select`` adds over ``read_ast`` (``start_column``/``end_column``) so
-    the output schema stays identical to ``read_ast`` and downstream consumers are unchanged.
+    substrings, ``:decorated`` / ``:async``, and ``:line`` / ``:lines`` / ``:long`` /
+    ``:complex`` thresholds), which sitting_duck cannot express, are split off by
+    :func:`split_post_filters` and applied as a ``WHERE`` over ``read_ast`` columns.
+
+    With no post-filter the plain ``ast_select`` result is returned (``EXCLUDE`` drops the
+    two columns it adds over ``read_ast``). With a post-filter we **recover the full
+    ``read_ast`` row** by joining on node identity: ``ast_select`` calls
+    ``read_ast(..., peek := 'none')`` so its ``peek`` column is NULL (and it adds
+    ``start_column``/``end_column``), but it preserves ``node_id``/``file_path`` — so the
+    join yields the populated ``peek`` (needed by ``:contains`` / ``:async``) and the exact
+    21-column ``read_ast`` schema.
     """
     from pluckit.selectors import resolve_aliases, split_post_filters
     structural, conditions = split_post_filters(selector)
     sel = resolve_aliases(structural)  # .fn → .def-func → .definition_function; sitting_duck owns the rest
+    base = f"ast_select('{_esc(source)}', '{_esc(sel)}')"
+    if not conditions:
+        return f"SELECT * EXCLUDE (start_column, end_column) FROM {base}"
+    # Recover the full read_ast row (peek populated, exact 21-col schema) inside a subquery,
+    # then post-filter outside so the conditions' bare column names are unambiguous.
     return (
-        "SELECT * EXCLUDE (start_column, end_column) "
-        f"FROM ast_select('{_esc(source)}', '{_esc(sel)}')"
-        + _post_filter_where(conditions)
+        f"SELECT * FROM (SELECT r.* FROM {base} s "
+        f"JOIN read_ast('{_esc(source)}') r "
+        f"ON r.node_id = s.node_id AND r.file_path = s.file_path) "
+        f"WHERE {' AND '.join(conditions)}"
     )
 
 
 def ast_select_from_sql(table: str, selector: str) -> str:
     """Like :func:`ast_select_sql` but over an already-materialized ``read_ast`` table
     (a cache table, a user-provided table/view, or a chained selection), via
-    sitting_duck's ``ast_select_from``. That macro returns the table's columns as-is
-    (already the ``read_ast`` schema), so no EXCLUDE is needed. pluckit's post-filter
-    pseudo-classes are applied the same way as in :func:`ast_select_sql`."""
+    sitting_duck's ``ast_select_from``. With a post-filter, the source ``table``'s columns
+    are recovered by joining on node identity — the table is already the ``read_ast``
+    schema (``peek`` populated), so this keeps ``:contains`` / ``:async`` working there too."""
     from pluckit.selectors import resolve_aliases, split_post_filters
     structural, conditions = split_post_filters(selector)
     sel = resolve_aliases(structural)  # .fn → .def-func → .definition_function; sitting_duck owns the rest
+    base = f"ast_select_from('{_esc(table)}', '{_esc(sel)}')"
+    if not conditions:
+        return f"SELECT * FROM {base}"
+    # Recover the source table's columns inside a subquery, then post-filter outside so the
+    # conditions' bare column names are unambiguous.
     return (
-        f"SELECT * FROM ast_select_from('{_esc(table)}', '{_esc(sel)}')"
-        + _post_filter_where(conditions)
+        f"SELECT * FROM (SELECT t.* FROM {base} s "
+        f"JOIN {table} t ON t.node_id = s.node_id AND t.file_path = s.file_path) "
+        f"WHERE {' AND '.join(conditions)}"
     )
 
 

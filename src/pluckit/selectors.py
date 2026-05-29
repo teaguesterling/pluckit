@@ -374,15 +374,20 @@ _BUILTINS: list[dict] = [
         "takes_arg": True,
     },
     {
+        # Best-effort: the node source starts with the `async` keyword (decorators live
+        # in `modifiers`, not `peek`, so they don't prefix it). Python/JS-leaning, like
+        # :exported's underscore convention. sitting_duck's native :async is a stub (0).
         "name": ":async",
         "engine": "sitting_duck",
-        "sql_template": None,
+        "sql_template": "peek LIKE 'async %'",
         "takes_arg": False,
     },
     {
+        # Decorators populate the read_ast `modifiers` list (e.g. ['@property']); a bare
+        # definition has []. sitting_duck's native :decorated is a stub (0).
         "name": ":decorated",
         "engine": "sitting_duck",
-        "sql_template": None,
+        "sql_template": "len(modifiers) > 0",
         "takes_arg": False,
     },
 ]

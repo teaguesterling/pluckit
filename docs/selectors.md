@@ -122,12 +122,16 @@ used in `find()` or `filter()`):
 | `:lines(a,b)`    | Node lies within lines `a`–`b`                           |
 | `:long(n)`       | Node is longer than `n` lines                            |
 | `:complex(n)`    | Node has more than `n` descendant nodes                  |
+| `:decorated`     | Node has one or more decorators (`modifiers` non-empty)  |
+| `:async`         | Source begins with `async` (best-effort; Python/JS)      |
 
 ```css
 .fn:exported                 /* public functions */
 .fn:private                  /* _underscore-prefixed functions */
 .fn:complex(50)              /* functions with >50 AST descendants */
 .fn:long(80)                 /* functions longer than 80 lines */
+.fn:decorated                /* functions with a decorator */
+.fn:async                    /* async functions */
 ```
 
 !!! note "Top-level only"
