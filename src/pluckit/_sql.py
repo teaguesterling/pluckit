@@ -1,8 +1,14 @@
 # src/pluckit/_sql.py
-"""SQL fragment builders for sitting_duck queries."""
-from __future__ import annotations
+"""SQL fragment builders for sitting_duck queries.
 
-import re
+pluckit no longer compiles CSS selectors to SQL — sitting_duck's ``ast_select`` /
+``ast_select_from`` macros own the selector grammar (matching, ``:has`` / ``:not``,
+pseudo-classes, combinators). This module only builds the thin SQL that *calls* those
+macros (see :func:`ast_select_sql` / :func:`ast_select_from_sql`), plus the structural
+join fragments used for chained navigation (descendant / child / sibling) and the
+``read_ast`` escape helpers.
+"""
+from __future__ import annotations
 
 
 def _esc(s: str) -> str:
@@ -10,210 +16,36 @@ def _esc(s: str) -> str:
     return s.replace("'", "''")
 
 
-# Mapping from taxonomy class names (after alias resolution) to semantic_type codes.
-# These are the numeric values returned by semantic_type_code() in sitting_duck.
-_TAXONOMY_TO_SEMANTIC: dict[str, int] = {
-    # Definition
-    "def-func": 240,   # DEFINITION_FUNCTION
-    "def-class": 248,  # DEFINITION_CLASS
-    "def-var": 244,    # DEFINITION_VARIABLE
-    "def-module": 252, # DEFINITION_MODULE
-    # Flow
-    "flow-loop": 148,  # FLOW_LOOP
-    "flow-jump": 152,  # FLOW_JUMP
-    # Error handling
-    "error-try": 160,    # ERROR_TRY
-    "error-catch": 164,  # ERROR_CATCH
-    "error-throw": 168,  # ERROR_THROW
-    "error-finally": 172, # ERROR_FINALLY
-    # Organization
-    "block-body": 176,  # ORGANIZATION_BLOCK
-    "block-ns": 176,    # ORGANIZATION_BLOCK (modules/namespaces)
-    # Literals
-    "literal-str": 68,   # LITERAL_STRING
-    "literal-num": 64,   # LITERAL_NUMBER
-    # Name
-    "name-id": 80,  # NAME_IDENTIFIER
-    # Metadata
-    "metadata-comment": 32,     # METADATA_COMMENT
-    "metadata-annotation": 36,  # METADATA_ANNOTATION
-    # External
-    "external-import": 48,  # EXTERNAL_IMPORT
-    "external-export": 52,  # EXTERNAL_EXPORT
-    # Statement
-    "statement-assign": 204,  # OPERATOR_ASSIGNMENT
-    # Execution
-    "execution": 128,  # EXECUTION_STATEMENT
-    # Access (COMPUTATION_*)
-    "access-call": 208,    # COMPUTATION_CALL
-    "access-member": 212,  # COMPUTATION_ACCESS (attribute / field access)
-    "access-index": 212,   # COMPUTATION_ACCESS (subscript) — shares code with member
-    # Identifier sub-kinds — not given distinct codes yet, fall through to name-id
-    "name-self": 80,
-    "name-super": 80,
-}
-
-# Selector token pattern: .class-name  optionally followed by #id
-_SELECTOR_RE = re.compile(
-    r"^\.(?P<cls>[a-zA-Z_-]+)(?:#(?P<id>[^\s\[:\#]+))?(?P<rest>.*)$"
-)
-
-# Attribute selector pattern: [name op "value"] or [name op value]
-_ATTR_RE = re.compile(
-    r'\[(?P<attr>\w+)\s*(?P<op>=|\^=|\$=|\*=)\s*(?P<q>["\']?)(?P<val>[^"\'\]]*)(?P=q)\]'
-)
-
-# Pseudo-class pattern: :name or :name(arg)
-# Matches a leading ':' followed by an identifier, plus an optional
-# parenthesized argument list. The argument body may contain commas so
-# we capture it lazily up to the matching close paren.
-_PSEUDO_RE = re.compile(
-    r":(?P<name>[a-zA-Z_][a-zA-Z0-9_-]*)(?:\((?P<arg>[^)]*)\))?"
-)
-
-
 def _esc_like(value: str) -> str:
     """Escape SQL LIKE wildcards (_ and %) in a value and SQL-escape quotes."""
     return value.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_").replace("'", "''")
 
 
-def _attr_to_condition(attr: str, op: str, value: str) -> str | None:
-    """Translate an attribute selector to a SQL WHERE fragment.
-
-    Supported attributes: name, type, language.
-    Operators: = (exact), *= (contains), ^= (startswith), $= (endswith).
-    """
-    col_map = {
-        "name": "name",
-        "type": "type",
-        "language": "language",
-    }
-    col = col_map.get(attr)
-    if col is None:
-        return None  # Unknown attribute — skip
-    if op == "=":
-        # Exact match uses =, not LIKE, so no wildcard escape needed
-        return f"{col} = '{_esc(value)}'"
-    # LIKE variants — escape _ and % to preserve literal meaning
-    val = _esc_like(value)
-    if op == "^=":
-        return f"{col} LIKE '{val}%' ESCAPE '\\'"
-    if op == "$=":
-        return f"{col} LIKE '%{val}' ESCAPE '\\'"
-    if op == "*=":
-        return f"{col} LIKE '%{val}%' ESCAPE '\\'"
-    return None
-
-
-def _selector_to_where(selector: str) -> str:
-    """Translate a CSS-like selector to a SQL WHERE clause.
-
-    Handles:
-      .class-name          → semantic_type = N
-      .class-name#id-name  → semantic_type = N AND name = 'id-name'
-      .class-name[attr=v]  → ... AND attr = 'v'
-      .class-name[name^=_] → ... AND name LIKE '_%'
-
-    Also excludes syntax-only nodes (keyword tokens) via the flags byte
-    so `.fn` matches function_definition nodes but not the `def` keyword
-    token inside them.
-
-    Returns a SQL boolean expression string.
-    """
-    from pluckit.selectors import resolve_alias
-
-    # Resolve alias first (.function → .def-func)
-    resolved = resolve_alias(selector)
-
-    m = _SELECTOR_RE.match(resolved)
-    if m is None:
-        # Fallback: match by tree-sitter type name directly
-        if resolved and not resolved.startswith(":"):
-            # Still exclude syntax-only tokens
-            return f"type = '{_esc(resolved)}' AND (flags & 1) = 0"
-        return "1=1"
-
-    cls = m.group("cls")
-    id_name = m.group("id")
-    rest = m.group("rest") or ""
-
-    conditions = []
-
-    sem_code = _TAXONOMY_TO_SEMANTIC.get(cls)
-    if sem_code is not None:
-        conditions.append(f"semantic_type = {sem_code}")
-        # Exclude syntax-only tokens (keyword tokens like `def`, `class`)
-        conditions.append("(flags & 1) = 0")
-    elif cls.startswith(("def-", "access-", "flow-", "error-", "literal-",
-                          "name-", "block-", "metadata-", "external-",
-                          "statement-", "operator-")):
-        # Resolved alias with no mapped semantic code — fail closed rather
-        # than silently matching everything. This guards against the
-        # selector compiler quietly drifting as sitting_duck's taxonomy grows.
-        return "1=0"
-
-    if id_name:
-        conditions.append(f"name = '{_esc(id_name)}'")
-
-    # Parse attribute selectors from the rest
-    for attr_match in _ATTR_RE.finditer(rest):
-        attr_cond = _attr_to_condition(
-            attr_match.group("attr"),
-            attr_match.group("op"),
-            attr_match.group("val"),
-        )
-        if attr_cond:
-            conditions.append(attr_cond)
-
-    # Parse pseudo-classes from the rest (e.g., .fn:exported, .fn:public)
-    # Unknown pseudo-classes are skipped silently — the PseudoClassRegistry
-    # is authoritative about which ones compile to SQL.
-    from pluckit.selectors import PseudoClassRegistry
-
-    pseudo_registry = PseudoClassRegistry()
-    for pseudo_match in _PSEUDO_RE.finditer(rest):
-        pname = ":" + pseudo_match.group("name")
-        entry = pseudo_registry.get(pname)
-        if entry is None or not entry.sql_template:
-            continue
-        template = entry.sql_template
-        if entry.takes_arg:
-            arg = pseudo_match.group("arg") or ""
-            # Support both positional {arg} and {arg0}/{arg1} for two-arg forms
-            parts = [p.strip() for p in arg.split(",")] if arg else [""]
-            try:
-                if "{arg0}" in template or "{arg1}" in template:
-                    template = template.format(
-                        arg0=parts[0] if len(parts) > 0 else "",
-                        arg1=parts[1] if len(parts) > 1 else "",
-                    )
-                else:
-                    template = template.format(arg=_esc(parts[0]))
-            except (KeyError, IndexError):
-                continue
-        conditions.append(template)
-
-    if not conditions:
-        return "1=1"
-
-    return " AND ".join(conditions)
+def _post_filter_where(conditions: list[str]) -> str:
+    """Render pluckit post-filter conditions as a trailing ``WHERE`` clause (or empty)."""
+    return f" WHERE {' AND '.join(conditions)}" if conditions else ""
 
 
 def ast_select_sql(source: str, selector: str) -> str:
     """Build SQL selecting AST nodes matching ``selector`` from ``source`` files.
 
-    Delegates the CSS-selector grammar to sitting_duck's ``ast_select`` macro — the
-    single source of truth (full ``:has`` / ``:not`` / combinator support plus
-    sitting_duck's native pseudo-classes). pluckit no longer compiles selectors itself.
-    The ``EXCLUDE`` drops the two columns ``ast_select`` adds over ``read_ast``
-    (``start_column``/``end_column``) so the output schema stays identical to
-    ``read_ast`` and downstream consumers are unchanged.
+    Delegates the *structural* selector grammar to sitting_duck's ``ast_select`` macro —
+    the single source of truth (classes, types, #ids, [attrs], combinators, ``:has`` /
+    ``:not``, and sitting_duck's native pseudo-classes). pluckit's own value-add
+    pseudo-classes (``:exported`` / ``:private`` name conventions, ``:contains`` peek
+    substrings, ``:line`` / ``:lines`` / ``:long`` / ``:complex`` thresholds), which
+    sitting_duck cannot express, are split off by :func:`split_post_filters` and applied
+    as a trailing ``WHERE`` over the macro's ``read_ast`` columns. The ``EXCLUDE`` drops the
+    two columns ``ast_select`` adds over ``read_ast`` (``start_column``/``end_column``) so
+    the output schema stays identical to ``read_ast`` and downstream consumers are unchanged.
     """
-    from pluckit.selectors import resolve_aliases
-    sel = resolve_aliases(selector)  # .fn → .def-func etc.; sitting_duck owns the rest
+    from pluckit.selectors import resolve_aliases, split_post_filters
+    structural, conditions = split_post_filters(selector)
+    sel = resolve_aliases(structural)  # .fn → .def-func → .definition_function; sitting_duck owns the rest
     return (
         "SELECT * EXCLUDE (start_column, end_column) "
         f"FROM ast_select('{_esc(source)}', '{_esc(sel)}')"
+        + _post_filter_where(conditions)
     )
 
 
@@ -221,10 +53,15 @@ def ast_select_from_sql(table: str, selector: str) -> str:
     """Like :func:`ast_select_sql` but over an already-materialized ``read_ast`` table
     (a cache table, a user-provided table/view, or a chained selection), via
     sitting_duck's ``ast_select_from``. That macro returns the table's columns as-is
-    (already the ``read_ast`` schema), so no EXCLUDE is needed."""
-    from pluckit.selectors import resolve_aliases
-    sel = resolve_aliases(selector)  # .fn → .def-func etc.; sitting_duck owns the rest
-    return f"SELECT * FROM ast_select_from('{_esc(table)}', '{_esc(sel)}')"
+    (already the ``read_ast`` schema), so no EXCLUDE is needed. pluckit's post-filter
+    pseudo-classes are applied the same way as in :func:`ast_select_sql`."""
+    from pluckit.selectors import resolve_aliases, split_post_filters
+    structural, conditions = split_post_filters(selector)
+    sel = resolve_aliases(structural)  # .fn → .def-func → .definition_function; sitting_duck owns the rest
+    return (
+        f"SELECT * FROM ast_select_from('{_esc(table)}', '{_esc(sel)}')"
+        + _post_filter_where(conditions)
+    )
 
 
 def read_ast_sql(source: str, **kwargs) -> str:

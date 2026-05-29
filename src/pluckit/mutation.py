@@ -105,14 +105,16 @@ class MutationEngine:
         """Find the first descendant of ``node`` matching ``anchor_selector``.
 
         Returns (start_line, end_line) of the first match, or None if no
-        descendants match. Uses pluckit's selector compiler + a DFS range
-        check so the anchor is scoped to the parent's subtree.
+        descendants match. Matching is delegated to sitting_duck's ``ast_select``
+        (single-file form); a DFS ``node_id`` range check then scopes the anchor to
+        the parent's subtree. ``ast_select`` re-numbers from the same ``read_ast``
+        parse, so its ``node_id``s align with the ``parent`` CTE's.
         """
-        from pluckit._sql import _esc, _selector_to_where
+        from pluckit._sql import _esc, ast_select_sql
 
-        where = _selector_to_where(anchor_selector)
         file_path = _esc(node["file_path"])
         node_id = int(node["node_id"])
+        matched = ast_select_sql(node["file_path"], anchor_selector)
 
         sql = f"""
             WITH parent AS (
@@ -121,10 +123,9 @@ class MutationEngine:
                 WHERE node_id = {node_id}
             )
             SELECT c.start_line, c.end_line
-            FROM read_ast('{file_path}') c, parent p
+            FROM ({matched}) c, parent p
             WHERE c.node_id > p.node_id
               AND c.node_id <= p.node_id + p.descendant_count
-              AND ({where})
             ORDER BY c.node_id
             LIMIT 1
         """
