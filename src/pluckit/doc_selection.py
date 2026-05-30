@@ -161,7 +161,7 @@ class DocSelection:
         """Materialize all sections as a list of dicts."""
         columns = [col[0] for col in self._rel.description]
         rows = self._rel.fetchall()
-        return [dict(zip(columns, row)) for row in rows]
+        return [dict(zip(columns, row, strict=True)) for row in rows]
 
     def content(self) -> list[str]:
         """List of section content strings."""

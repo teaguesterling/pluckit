@@ -93,6 +93,7 @@ class _Context:
                 self.repo, profile=profile, modules=modules, init=init,
             )
         self._extensions_loaded = False
+        self._markdown_loaded = False
         self._ensure_extensions()
 
     def _ensure_extensions(self) -> None:
@@ -125,6 +126,36 @@ class _Context:
                     ) from e
                 # Optional extension unavailable — continue silently.
         self._extensions_loaded = True
+
+    def _ensure_markdown_extension(self) -> None:
+        """Lazy-load the duckdb_markdown community extension (idempotent).
+
+        Required for ``Plucker(docs=...)`` which uses ``read_markdown_sections``.
+        Loaded lazily (only when ``Plucker.docs()`` is called) so Pluckers
+        that never touch markdown don't pay the install/load cost — and so
+        an offline env without the extension only errors for docs users.
+        """
+        if self._markdown_loaded:
+            return
+        from pluckit.types import PluckerError
+
+        try:
+            self.db.sql("LOAD markdown")
+            self._markdown_loaded = True
+            return
+        except duckdb.Error:
+            pass
+        try:
+            self.db.sql("INSTALL markdown FROM community")
+            self.db.sql("LOAD markdown")
+            self._markdown_loaded = True
+        except duckdb.Error as e:
+            raise PluckerError(
+                "Failed to install the 'markdown' DuckDB extension from the "
+                f"community repository: {e}. The docs= parameter requires "
+                "duckdb_markdown's read_markdown_sections function. Run "
+                "`pluckit init` to diagnose."
+            ) from e
 
     def source(self, glob: str) -> Source:
         """Create a Source from a glob pattern relative to this repo."""

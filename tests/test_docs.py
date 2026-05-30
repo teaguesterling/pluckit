@@ -1,6 +1,7 @@
 """Tests for DocSelection and the docs= parameter."""
 from __future__ import annotations
 
+import importlib.util
 import textwrap
 
 import pytest
@@ -10,12 +11,8 @@ from pluckit.pluckins.search import Search
 from pluckit.types import PluckerError
 
 
-def _fledgling_available():
-    try:
-        import fledgling
-        return True
-    except ImportError:
-        return False
+def _fledgling_available() -> bool:
+    return importlib.util.find_spec("fledgling") is not None
 
 
 requires_fledgling = pytest.mark.skipif(
@@ -210,7 +207,6 @@ class TestDocSelectionSearch:
         assert result.count() > 0
 
     def test_search_respects_filter_chain(self, pluck_fts_docs):
-        all_results = pluck_fts_docs.docs().search("database")
         filtered = pluck_fts_docs.docs().filter(file_path="guide").search("database")
         guide_files = filtered.files()
         assert all("guide" in f for f in guide_files)

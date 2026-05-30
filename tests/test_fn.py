@@ -1,18 +1,16 @@
 """Tests for FnAccessor — direct fledgling macro access."""
 from __future__ import annotations
 
+import importlib.util
+
 import pytest
 
 from pluckit import Plucker
 from pluckit.fn import FnAccessor
 
 
-def _fledgling_available():
-    try:
-        import fledgling
-        return True
-    except ImportError:
-        return False
+def _fledgling_available() -> bool:
+    return importlib.util.find_spec("fledgling") is not None
 
 
 requires_fledgling = pytest.mark.skipif(
@@ -39,7 +37,7 @@ class TestFnAccessorBasic:
     def test_fn_private_attr_raises(self, sample_dir):
         p = Plucker(code=str(sample_dir / "src/**/*.py"))
         with pytest.raises(AttributeError):
-            p.fn._private
+            p.fn._private  # noqa: B018 — attribute access is the test
 
 
 @requires_fledgling

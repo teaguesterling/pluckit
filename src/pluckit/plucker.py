@@ -139,6 +139,10 @@ class Plucker:
                 "No docs source configured. "
                 "Use Plucker(docs='**/*.md') or Plucker(docs='docs/**/*.md')"
             )
+        # read_markdown_sections comes from the duckdb_markdown community
+        # extension — lazy-load on first use so Pluckers that never call
+        # docs() don't pay the install/load cost.
+        self._ctx._ensure_markdown_extension()
         import os
         glob = self._docs_source
         if not os.path.isabs(glob):

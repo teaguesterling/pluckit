@@ -1,18 +1,16 @@
 """Tests for FtsCollection — named BM25 collections via pluckit."""
 from __future__ import annotations
 
+import importlib.util
+
 import pytest
 
 from pluckit import Plucker
 from pluckit.pluckins.search import Search
 
 
-def _fledgling_available():
-    try:
-        import fledgling
-        return True
-    except ImportError:
-        return False
+def _fledgling_available() -> bool:
+    return importlib.util.find_spec("fledgling") is not None
 
 
 requires_fledgling = pytest.mark.skipif(
