@@ -6,6 +6,29 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+- `Plucker.docs()` now lazy-loads the `duckdb_markdown` community extension via
+  `_Context._ensure_markdown_extension()`, so Pluckers configured with
+  `docs=...` work in ephemeral envs (e.g. fresh CI) that don't have the
+  extension pre-installed. Previously hit a raw
+  `CatalogException: Table Function with name read_markdown_sections does not exist`;
+  now installs from community on first use and raises a clean `PluckerError` if
+  that fails. Pluckers that never call `.docs()` don't pay the install cost.
+- `TestSearchWithoutFledgling::test_error_message_without_fts` assertion was
+  pinned to `"FTS index"` but the actual error message varies by env:
+  `"FTS search requires fledgling"` (no fledgling), `"FTS index not found"`
+  (no FTS schema), `"FTS index is empty"` (schema present, no rows).
+  Regex broadened to `r"FTS (index|search)"`.
+- `test_fn.py @requires_fledgling` predicate now verifies the fledgling
+  extension actually *loads* (not just that the Python module is importable),
+  so tests that assert on specific fledgling SQL macros (`doc_outline`,
+  `find_definitions`) skip cleanly in CI envs where the bundled extension
+  doesn't match the duckdb version pip resolves.
+- Internal: chain `except`'d errors with `raise ... from e` in `_assert_fts_index`
+  so the underlying duckdb error is preserved in the traceback (B904).
+- Cleared 15 long-standing ruff errors (B905, B904, B018, F401×4, F841,
+  E741×5, I001×2) — `ruff check src tests` now clean on `main`.
+
 ## [0.13.0] — 2026-05-26
 
 ### Added (public API — SemVer-stable from here)
