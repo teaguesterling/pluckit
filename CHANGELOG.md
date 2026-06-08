@@ -6,6 +6,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.14.0] - 2026-06-08
+
 ### Fixed
 - `Plucker.docs()` now lazy-loads the `duckdb_markdown` community extension via
   `_Context._ensure_markdown_extension()`, so Pluckers configured with
