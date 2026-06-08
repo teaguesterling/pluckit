@@ -29,6 +29,27 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Cleared 15 long-standing ruff errors (B905, B904, B018, F401×4, F841,
   E741×5, I001×2) — `ruff check src tests` now clean on `main`.
 
+### Changed
+- **Selector matching is now delegated to sitting_duck's `ast_select` /
+  `ast_select_from`.** pluckit's partial Python selector→SQL compiler is removed;
+  sitting_duck is now the single source of truth for the *structural* grammar
+  (classes, types, `#id`, `[attr]`, combinators, `:has` / `:not`, and its native
+  pseudo-classes). This fixes silent over-matching: `:has()` / `:not()` /
+  combinators that the old compiler dropped now work in `Plucker.find()` and chained
+  `.find()` / `.ancestor()` (previously `.fn:has(.call#x)` collapsed to `.fn`).
+
+### Added
+- **Value-add pseudo-classes as post-filters.** `:exported` / `:private` (Python
+  name convention), `:contains(s)` (`peek` substring), and `:line(n)` / `:lines(a,b)` /
+  `:long(n)` / `:complex(n)` (line/size/complexity thresholds) are applied as a SQL
+  `WHERE` over the delegated result — sitting_duck cannot express these natively. They
+  have identical meaning in `find()` and `filter()`. (`:line` / `:lines` / `:long` /
+  `:complex` now work in selector strings, not just deferred.)
+
+### Removed
+- Dropped the never-implemented `:wide` and `:last` pseudo-classes (both had no SQL
+  template and silently matched everything).
+
 ## [0.13.0] — 2026-05-26
 
 ### Added (public API — SemVer-stable from here)

@@ -1,26 +1,33 @@
 # Selector & Declaration Language
 
 pluckit's selector language is a CSS-inspired syntax for addressing AST
-nodes. It's compiled to SQL over [sitting_duck](https://github.com/teaguesterling/sitting_duck)'s
-`read_ast()` table function, which means queries are fast and composable
-with anything else DuckDB can do.
+nodes. The **structural grammar** is [sitting_duck](https://github.com/teaguesterling/sitting_duck)'s
+— pluckit delegates matching to sitting_duck's `ast_select` / `ast_select_from`
+macros over its `read_ast()` table function, so queries are fast, composable
+with anything else DuckDB can do, and share one engine with the rest of the suite.
+
+pluckit adds two thin layers on top of that engine:
+
+1. **Ergonomic shorthand** — short aliases (`.fn`, `.cls`, `.call`) that resolve to
+   sitting_duck's semantic-type classes (`.definition_function`, …).
+2. **Value-add pseudo-classes** — a small set of filters sitting_duck cannot express
+   (`:exported` / `:private` name conventions, `:contains` peek substrings, and the
+   `:line` / `:lines` / `:long` / `:complex` thresholds), applied as a post-filter.
 
 This page documents:
 
-- The **selector syntax** pluckit's compiler currently supports
-- The **semantic taxonomy** — how CSS class names map to sitting_duck's
+- The **selector syntax** (sitting_duck's structural grammar + pluckit's two layers)
+- The **semantic taxonomy** — how shorthand class names map to sitting_duck's
   cross-language node categories
 - The **`{ show: ... }` declaration language** used by the viewer
 
-!!! note "Upstream vs pluckit"
-    sitting_duck ships a richer selector language than pluckit's
-    fluent layer currently compiles. Features like `:calls()`,
-    `:matches()`, `:scope()`, and the call-graph pseudo-elements work
-    when you call `ast_select` directly against the underlying DuckDB
-    connection, but aren't yet wired into `Plucker.find()`. This page
-    documents the pluckit-compiled subset. See the
-    [sitting_duck docs](https://github.com/teaguesterling/sitting_duck)
-    for the full upstream language.
+!!! note "One engine"
+    Because matching is delegated to sitting_duck, the full upstream structural
+    grammar — `:has()`, `:not()`, combinators, `[attr]` operators, and sitting_duck's
+    native pseudo-classes (`:scope`, `:calls`, `:nth-child`, `:match`, …) — works
+    directly through `Plucker.find()`. pluckit no longer maintains a separate, narrower
+    compiler. See the [sitting_duck docs](https://github.com/teaguesterling/sitting_duck)
+    for the complete structural grammar.
 
 ---
 
@@ -91,23 +98,46 @@ Space-separated selectors match descendants:
 
 ### Pseudo-classes
 
-pluckit ships with a small set of pseudo-classes backed by the
-sitting_duck flags byte and name conventions:
+Two kinds, from the two layers:
 
-| Pseudo-class     | Meaning                                                  |
-|------------------|----------------------------------------------------------|
-| `:exported`      | Name is public (non-underscore prefix in Python, etc.)   |
-| `:not(sel)`      | Negation                                                 |
-| `:has(sel)`      | Has a descendant matching `sel`                          |
+**Structural — handled by sitting_duck.** `:has()`, `:not()`, and sitting_duck's full
+native set (`:scope`, `:empty`, `:first-child`, `:nth-child(n)`, `:calls`, `:called-by`,
+`:match`, …) pass straight through to the engine:
 
 ```css
-.fn:exported                 /* public functions */
 .fn:not(:has(.try))          /* functions with no try block */
 .fn:has(.call#execute)       /* functions that call execute() */
 ```
 
-`:not()` and `:has()` compose — pluckit compiles them to correlated
-EXISTS / NOT EXISTS sub-queries over the same `read_ast()` table.
+**Value-add — pluckit post-filters.** A small set sitting_duck cannot express, applied as a
+`WHERE` over the matched nodes' `read_ast` columns (so they have identical meaning whether
+used in `find()` or `filter()`):
+
+| Pseudo-class     | Meaning                                                  |
+|------------------|----------------------------------------------------------|
+| `:exported`      | Public name (no leading underscore — Python convention)  |
+| `:private`       | Private name (leading underscore)                        |
+| `:contains(s)`   | Node's `peek` text contains the substring `s`            |
+| `:line(n)`       | Node spans line `n`                                      |
+| `:lines(a,b)`    | Node lies within lines `a`–`b`                           |
+| `:long(n)`       | Node is longer than `n` lines                            |
+| `:complex(n)`    | Node has more than `n` descendant nodes                  |
+| `:decorated`     | Node has one or more decorators (`modifiers` non-empty)  |
+| `:async`         | Source begins with `async` (best-effort; Python/JS)      |
+
+```css
+.fn:exported                 /* public functions */
+.fn:private                  /* _underscore-prefixed functions */
+.fn:complex(50)              /* functions with >50 AST descendants */
+.fn:long(80)                 /* functions longer than 80 lines */
+.fn:decorated                /* functions with a decorator */
+.fn:async                    /* async functions */
+```
+
+!!! note "Top-level only"
+    pluckit's value-add pseudo-classes are top-level filters on the matched set. A pluckit
+    pseudo-class nested inside a `:has()` / `:not()` argument is left for sitting_duck's
+    engine instead. For a compound selector the post-filter applies to the final matches.
 
 ---
 
@@ -164,14 +194,15 @@ taxonomy:
 See [`src/pluckit/selectors.py`](https://github.com/teaguesterling/pluckit/blob/main/src/pluckit/selectors.py)
 for the complete alias table.
 
-### Fail-closed behavior
+### How shorthand resolves
 
-If a selector resolves to a taxonomy class that pluckit's compiler
-doesn't yet have a semantic code for, the compiler emits a match-nothing
-WHERE clause rather than silently matching everything. This is a
-deliberate safety net — as sitting_duck's taxonomy grows, pluckit won't
-silently drift into over-matching. If you find a taxonomy gap,
-[open an issue](https://github.com/teaguesterling/pluckit/issues).
+A shorthand alias resolves in two steps: `.fn` → pluckit's taxonomy class `.def-func`
+(the form `resolve_alias` exposes) → sitting_duck's semantic-type class
+`.definition_function` (the name its `ast_select` understands). Aliases with no clean
+sitting_duck equivalent, already-canonical sitting_duck names, and bare tree-sitter types
+all pass through unchanged. sitting_duck is the single source of truth for what a class
+matches, so the taxonomy can no longer drift away from the engine. If you find a missing
+alias, [open an issue](https://github.com/teaguesterling/pluckit/issues).
 
 ---
 

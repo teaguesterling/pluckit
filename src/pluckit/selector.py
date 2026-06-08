@@ -20,18 +20,24 @@ class Selector(str):
             return False
 
     def validate(self) -> None:
-        from pluckit._sql import _selector_to_where
+        """Lightweight *syntactic* validation of the selector string.
+
+        pluckit no longer owns selector semantics — sitting_duck's ``ast_select`` is the
+        grammar, and the only way to truly validate a selector is to run it against a
+        connection. This method therefore only catches obvious structural garbage
+        (empty selectors, unbalanced ``()`` / ``[]``); semantic validity (unknown
+        pseudo-classes, taxonomy classes that match nothing) is sitting_duck's to decide
+        at query time.
+        """
         from pluckit.types import PluckerError
 
-        try:
-            result = _selector_to_where(str(self))
-        except Exception as e:
-            raise PluckerError(f"Invalid selector {self!r}: {e}") from e
-        if result == "1=0":
-            raise PluckerError(
-                f"Selector {self!r} resolved to a taxonomy class with no "
-                f"known semantic type code — it would match nothing."
-            )
+        s = str(self).strip()
+        if not s:
+            raise PluckerError(f"Invalid selector {self!r}: empty selector")
+        if s.count("(") != s.count(")"):
+            raise PluckerError(f"Invalid selector {self!r}: unbalanced parentheses")
+        if s.count("[") != s.count("]"):
+            raise PluckerError(f"Invalid selector {self!r}: unbalanced brackets")
 
     def to_dict(self) -> dict[str, Any]:
         return {"selector": str(self)}

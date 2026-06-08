@@ -8,12 +8,11 @@ Mutation methods materialize, splice source files, and return refreshed Selectio
 from __future__ import annotations
 
 import itertools
-import re as _re
 from typing import TYPE_CHECKING, Any
 
 import duckdb
 
-from pluckit._sql import _esc, _esc_like, _selector_to_where, descendant_join
+from pluckit._sql import _esc, _esc_like, ast_select_from_sql, descendant_join
 from pluckit.pluckins.base import PluckinRegistry
 from pluckit.types import PluckerError
 
@@ -23,7 +22,7 @@ if TYPE_CHECKING:
 # Counter for unique temp view names
 _view_counter = itertools.count()
 
-# Columns in read_ast output that may appear in WHERE clauses
+# Columns in read_ast output — the set projectable via attr() / usable as filter fields.
 _AST_COLUMNS = {
     "node_id", "type", "semantic_type", "flags", "name",
     "signature_type", "parameters", "modifiers", "annotations",
@@ -31,16 +30,6 @@ _AST_COLUMNS = {
     "parent_id", "depth", "sibling_index", "children_count",
     "descendant_count", "peek",
 }
-
-_COL_PATTERN = _re.compile(
-    r"(?:^|(?<=[\s(,]))(" + "|".join(sorted(_AST_COLUMNS, key=len, reverse=True)) + r")(?=[\s=<>!,)]|$)"
-)
-
-
-def _qualify_columns(sql_fragment: str, alias: str) -> str:
-    """Prefix bare column names in a SQL fragment with a table alias."""
-    return _COL_PATTERN.sub(lambda m: f"{alias}.{m.group(1)}", sql_fragment)
-
 
 # Valid attributes that can be projected via attr()
 _VALID_ATTRS = _AST_COLUMNS
@@ -138,26 +127,45 @@ class Selection:
         parts = [f"SELECT * FROM read_ast('{_esc(fp)}')" for fp in file_paths]
         return "(" + " UNION ALL ".join(parts) + ")"
 
+    def _materialize_full_ast(self, prefix: str = "ast") -> str:
+        """Register the full AST of this selection's files as a temp view; return its name.
+
+        sitting_duck's ``ast_select_from`` needs a *named* relation, so the UNION-ALL
+        ``read_ast`` query from :meth:`_full_ast_sql` is registered as a temp view here
+        (``find`` / ``ancestor`` match descendants/ancestors against the full subtree, not
+        just the already-selected nodes). The view persists for the connection session — the
+        lazy relation built on top references it — and is cleaned up when the connection closes.
+        """
+        name = self._view_name(prefix)
+        self._ctx.db.execute(
+            f"CREATE OR REPLACE TEMP VIEW {name} AS SELECT * FROM {self._full_ast_sql()} _t"
+        )
+        return name
+
     # ---------------------------------------------------------------
     # Query ops — each returns a new Selection
     # ---------------------------------------------------------------
 
     def find(self, selector: str) -> Selection:
-        """Find AST nodes matching selector that are descendants of current nodes."""
-        where = _selector_to_where(selector)
-        qualified_where = _qualify_columns(where, "c")
+        """Find AST nodes matching selector that are descendants of current nodes.
+
+        Matching is delegated to sitting_duck's ``ast_select_from`` over the full AST of
+        this selection's files; the structural ``descendant_join`` then scopes matches to
+        descendants of the currently-selected nodes. ``:has`` / ``:not`` / combinators in
+        ``selector`` work because sitting_duck evaluates them over that full AST.
+        """
         sel_view = self._register("find_sel")
-        ast_sql = self._full_ast_sql()
+        ast_view = self._materialize_full_ast()
         try:
+            matched = ast_select_from_sql(ast_view, selector)
             sql = (
-                f"SELECT DISTINCT c.* FROM {ast_sql} c "
+                f"SELECT DISTINCT c.* FROM ({matched}) c "
                 f"JOIN {sel_view} p "
-                f"ON c.file_path = p.file_path AND {descendant_join('p', 'c')} "
-                f"WHERE {qualified_where}"
+                f"ON c.file_path = p.file_path AND {descendant_join('p', 'c')}"
             )
             rel = self._ctx.db.sql(sql)
-            # The relation references sel_view, so we can't unregister yet.
-            # The view will be cleaned up by GC / connection close.
+            # The relation references sel_view / ast_view, so we can't unregister yet.
+            # They are cleaned up by GC / connection close.
         except Exception:
             self._unregister(sel_view)
             raise
@@ -239,11 +247,25 @@ class Selection:
         return result
 
     def not_(self, selector: str) -> Selection:
-        """Exclude nodes matching selector (anti-join)."""
-        where = _selector_to_where(selector)
-        result = self.filter_sql(f"NOT ({where})")
-        result._op = ("not_", (selector,), {})
-        return result
+        """Exclude nodes in the current selection that match selector (anti-join).
+
+        Unlike ``find``/``ancestor`` (which navigate the tree), ``not_`` filters the current
+        selection in place: it keeps the selected nodes that ``ast_select_from`` does *not*
+        match. ``selector`` is evaluated by sitting_duck over the selection itself.
+        """
+        sel_view = self._register("not_sel")
+        try:
+            matched = ast_select_from_sql(sel_view, selector)
+            sql = (
+                f"SELECT s.* FROM {sel_view} s "
+                f"WHERE NOT EXISTS (SELECT 1 FROM ({matched}) m "
+                f"WHERE m.file_path = s.file_path AND m.node_id = s.node_id)"
+            )
+            rel = self._ctx.db.sql(sql)
+        except Exception:
+            self._unregister(sel_view)
+            raise
+        return self._new(rel, op=("not_", (selector,), {}))
 
     def unique(self) -> Selection:
         """Deduplicate nodes by (file_path, node_id)."""
@@ -316,16 +338,14 @@ class Selection:
 
         Returns the deepest matching ancestor for each current node.
         """
-        where = _selector_to_where(selector)
-        qualified_where = _qualify_columns(where, "a")
         sel_view = self._register("anc_sel")
-        ast_sql = self._full_ast_sql()
+        ast_view = self._materialize_full_ast()
         try:
+            matched = ast_select_from_sql(ast_view, selector)
             sql = (
-                f"SELECT DISTINCT a.* FROM {ast_sql} a "
+                f"SELECT DISTINCT a.* FROM ({matched}) a "
                 f"JOIN {sel_view} s "
-                f"ON a.file_path = s.file_path AND {descendant_join('a', 's')} "
-                f"WHERE {qualified_where}"
+                f"ON a.file_path = s.file_path AND {descendant_join('a', 's')}"
             )
             rel = self._ctx.db.sql(sql)
         except Exception:
