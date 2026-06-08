@@ -5,7 +5,7 @@ import textwrap
 
 import pytest
 
-from pluckit.mutations import Patch, _parse_unified_diff, _apply_hunk
+from pluckit.mutations import Patch, _apply_hunk, _parse_unified_diff
 
 
 class TestPatchDetection:

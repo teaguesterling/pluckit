@@ -218,11 +218,11 @@ def _assert_fts_index(db) -> None:
     """Check that fts.content exists and has rows."""
     try:
         count = db.sql("SELECT count(*) FROM fts.content").fetchone()[0]
-    except Exception:
+    except Exception as e:
         raise PluckerError(
             "FTS index not found. Ensure fledgling is loaded with the 'fts' module "
             "and call rebuild_fts() before searching."
-        )
+        ) from e
     if count == 0:
         raise PluckerError(
             "FTS index is empty. Call rebuild_fts() to populate it."

@@ -1,6 +1,7 @@
 """Tests for the Search pluckin — BM25 full-text search integration."""
 from __future__ import annotations
 
+import importlib.util
 import textwrap
 
 import pytest
@@ -54,12 +55,8 @@ SAMPLE_DOCS = textwrap.dedent("""\
 """)
 
 
-def _fledgling_available():
-    try:
-        import fledgling
-        return True
-    except ImportError:
-        return False
+def _fledgling_available() -> bool:
+    return importlib.util.find_spec("fledgling") is not None
 
 
 requires_fledgling = pytest.mark.skipif(
@@ -187,12 +184,19 @@ class TestRebuildFts:
 
 class TestSearchWithoutFledgling:
     def test_error_message_without_fts(self, sample_dir):
+        # Search without a usable FTS index should error clearly. The exact
+        # path varies by env:
+        #   - no fledgling installed → "FTS search requires fledgling..."
+        #   - fledgling installed, no fts schema → "FTS index not found..."
+        #   - fts schema exists but empty → "FTS index is empty..."
+        # All three are valid "user needs to do something FTS-related"
+        # errors — match the common "FTS (index|search)..." shape.
         p = Plucker(
             code=str(sample_dir / "src/**/*.py"),
             plugins=[Search],
             repo=str(sample_dir),
         )
-        with pytest.raises(PluckerError, match="FTS index"):
+        with pytest.raises(PluckerError, match=r"FTS (index|search)"):
             p.search("test")
 
     def test_plugin_registration(self):

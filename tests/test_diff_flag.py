@@ -205,11 +205,11 @@ class TestDiffRoundTrip:
 
         # Should contain all standard unified diff elements
         lines = diff_text.splitlines()
-        assert any(l.startswith("---") for l in lines)
-        assert any(l.startswith("+++") for l in lines)
-        assert any(l.startswith("@@") for l in lines)
-        assert any(l.startswith("-def hello") for l in lines)
-        assert any(l.startswith("+def greet") for l in lines)
+        assert any(line.startswith("---") for line in lines)
+        assert any(line.startswith("+++") for line in lines)
+        assert any(line.startswith("@@") for line in lines)
+        assert any(line.startswith("-def hello") for line in lines)
+        assert any(line.startswith("+def greet") for line in lines)
 
     def test_patch_with_node_scoped_diff(self, sample_file):
         """Patch works with a diff scoped to the matched node's text."""

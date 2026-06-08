@@ -70,8 +70,9 @@ class _ModuleFnAccessor:
 
     def _ensure(self) -> FnAccessor:
         if self._accessor is None:
-            from pluckit._context import _new_connection_with_fledgling
             import os
+
+            from pluckit._context import _new_connection_with_fledgling
             con, loaded = _new_connection_with_fledgling(os.getcwd())
             if not loaded:
                 raise PluckerError(

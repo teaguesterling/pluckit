@@ -1,23 +1,41 @@
 """Tests for FnAccessor — direct fledgling macro access."""
 from __future__ import annotations
 
+import importlib.util
+from functools import cache
+
 import pytest
 
 from pluckit import Plucker
 from pluckit.fn import FnAccessor
 
 
-def _fledgling_available():
+@cache
+def _fledgling_macros_loaded() -> bool:
+    """True iff the fledgling extension actually loads in this env.
+
+    These tests assert specific fledgling macros (``doc_outline``,
+    ``find_definitions``) are attached to the duckdb connection — so it's
+    not enough that the Python ``fledgling`` package is importable; the
+    bundled extension binary must also load. In some CI envs the duckdb
+    pip pulls has no matching community-extension build for fledgling
+    (HTTP 404), so ``fledgling.connect()`` returns a bare connection and
+    ``_new_connection_with_fledgling`` reports ``loaded=False`` —
+    in which case these tests must skip cleanly rather than fail.
+    """
+    if importlib.util.find_spec("fledgling") is None:
+        return False
     try:
-        import fledgling
-        return True
-    except ImportError:
+        from pluckit._context import _new_connection_with_fledgling
+        _con, loaded = _new_connection_with_fledgling("/tmp")
+        return loaded
+    except Exception:
         return False
 
 
 requires_fledgling = pytest.mark.skipif(
-    not _fledgling_available(),
-    reason="fledgling not installed",
+    not _fledgling_macros_loaded(),
+    reason="fledgling extension not loaded (Python module may exist, but bundled extension didn't load)",
 )
 
 
@@ -39,7 +57,7 @@ class TestFnAccessorBasic:
     def test_fn_private_attr_raises(self, sample_dir):
         p = Plucker(code=str(sample_dir / "src/**/*.py"))
         with pytest.raises(AttributeError):
-            p.fn._private
+            p.fn._private  # noqa: B018 — attribute access is the test
 
 
 @requires_fledgling
