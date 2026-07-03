@@ -6,6 +6,55 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+- **Selector alias drift** ([#10]): documented aliases now resolve to their
+  documented targets instead of silently matching nothing or the wrong nodes.
+  `.def`/`.let`/`.jump` were missing from the alias table; `.module`/`.ns`/
+  `.namespace`/`.package` resolved to `ORGANIZATION_BLOCK` (every block)
+  instead of `DEFINITION_MODULE`; `.null`/`.none` resolved to *string*
+  literals and `.bool`/`.boolean` to an unmapped class — both now map to the
+  engine's `LITERAL_ATOMIC` (new taxonomy class `.literal-atom`). Newly
+  wired 1:1 equivalents verified against the installed sitting_duck build:
+  `.assert` → `ERROR_THROW`, `.union` → `DEFINITION_CLASS`,
+  `.del`/`.delete` → `EXECUTION_MUTATION`, `.comp`/`.comprehension` →
+  `TRANSFORM_QUERY`, `.include` → `EXTERNAL_IMPORT`, `.extern`/`.ffi` →
+  `EXTERNAL_FOREIGN`.
+- **Unknown selector classes fail loudly** ([#10]): a class that would
+  compile to a match-nothing predicate now raises
+  `UnknownSelectorClassError` (with the working alternative in the message)
+  instead of silently returning an empty result. This covers typos
+  (`.fnn`), removed aliases, and the taxonomy classes the engine cannot
+  express — notably `.self`/`.this`/`.super`, which previously resolved to
+  `NAME_IDENTIFIER` and matched **every identifier**.
+- **Alias substitution no longer rewrites attribute values** ([#10]):
+  `.fn[name*=.str]` used to become `[name*=.literal_string]`. `[attr]`
+  blocks, quoted strings, and non-selector pseudo-class arguments
+  (`:match('…')`, `:contains(…)`) are now copied verbatim; aliases still
+  resolve inside `:has()` / `:not()`.
+- **`:line`/`:lines`/`:long`/`:complex` arguments are `int()`-validated**
+  ([#10], LOW hardening): a non-integer argument such as
+  `:line(5 OR 1=1)` now raises `SelectorArgError` instead of being
+  interpolated raw into the post-filter WHERE clause (boolean-context
+  SQL-arg injection, reachable via squackit's `pluck` MCP tool). An argless
+  `:line` also raises instead of rendering malformed SQL. Same validation
+  applied to `Selection.filter(...)` pseudo-classes (which now accept
+  arguments, e.g. `.filter(":line(5)")`), `filter(field__gt=...)`
+  comparison values, and `at_line`/`at_lines`.
+- **`:contains` escapes LIKE wildcards**: `_`/`%` in the argument now match
+  literally (previously `_` matched any character).
+
+### Changed
+- `docs/selectors.md` reconciled with the shipped taxonomy: documents the
+  `.literal-atom` bucket (engine classifies booleans and null together),
+  notes that `.member`/`.index` are equivalent today (single
+  `COMPUTATION_ACCESS` type), documents the raising behavior for
+  inexpressible aliases with alternatives, and corrects the false claim
+  that `_` is auto-escaped in `[attr^=...]` values (the engine's LIKE has
+  no ESCAPE clause; use `.filter(name__startswith=...)` for literal
+  underscores).
+
+[#10]: https://github.com/teaguesterling/pluckit/issues/10
+
 ## [0.14.0] - 2026-06-08
 
 ### Fixed
