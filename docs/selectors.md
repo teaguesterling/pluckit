@@ -83,8 +83,14 @@ pluckit supports four CSS-style comparison operators on the `name`,
 .cls[language=python]    /* Python classes only */
 ```
 
-Underscores in the value are escaped automatically, so `[name^=test_]`
-matches `test_foo` but not `testXfoo`.
+!!! warning "`_` and `%` are LIKE wildcards in attribute values"
+    The prefix/suffix/contains operators (`^=`, `$=`, `*=`) compile to the
+    engine's SQL `LIKE`, and the current sitting_duck build does not escape
+    `_` or `%` in the value — so `[name^=test_]` matches `test_foo` **and**
+    `testXfoo`. Exact match (`=`) is unaffected. If you need a literal
+    underscore boundary, post-filter with `.filter(name__startswith="test_")`
+    (pluckit escapes wildcards there) until the engine grows an `ESCAPE`
+    clause.
 
 ### Descendant combinators
 
@@ -139,6 +145,13 @@ used in `find()` or `filter()`):
     pseudo-class nested inside a `:has()` / `:not()` argument is left for sitting_duck's
     engine instead. For a compound selector the post-filter applies to the final matches.
 
+!!! note "Argument validation"
+    `:line(n)`, `:lines(a,b)`, `:long(n)`, and `:complex(n)` require integer
+    arguments and raise `SelectorArgError` otherwise (including when the
+    argument is missing) — the values are parsed with `int()` before they
+    reach the underlying SQL. `:contains(s)` matches `_` and `%` literally
+    (pluckit escapes LIKE wildcards in the argument).
+
 ---
 
 ## The semantic taxonomy
@@ -161,18 +174,25 @@ taxonomy:
 | Selector(s)                          | Maps to              | Matches                             |
 |--------------------------------------|----------------------|-------------------------------------|
 | `.call`, `.invoke`                   | `access-call`        | Call expressions                    |
-| `.member`, `.attr`, `.field`, `.prop`| `access-member`      | Attribute / field access            |
-| `.index`, `.subscript`               | `access-index`       | Subscript access                    |
+| `.member`, `.attr`, `.field`, `.prop`| `access-member`      | Attribute / field / subscript access |
+| `.index`, `.subscript`               | `access-index`       | Attribute / field / subscript access |
+
+!!! note "`.member` and `.index` are equivalent today"
+    sitting_duck classifies attribute access and subscripting with a single
+    semantic type (`COMPUTATION_ACCESS`), so both taxonomy classes match the
+    same nodes. Narrow with a node-type filter when you need one of them,
+    e.g. `.member[type=attribute]` or `.index[type=subscript]` (Python).
 
 ### Flow & error handling
 
 | Selector(s)                          | Maps to              | Matches                             |
 |--------------------------------------|----------------------|-------------------------------------|
+| `.if`, `.cond`, `.match`, `.switch`  | `flow-cond`          | Conditional constructs              |
 | `.loop`, `.for`, `.while`            | `flow-loop`          | Loop constructs                     |
-| `.jump`, `.ret`, `.return`, `.break` | `flow-jump`          | Return, break, continue, goto       |
+| `.jump`, `.ret`, `.return`, `.break` | `flow-jump`          | Return, break, continue, yield      |
 | `.try`                               | `error-try`          | Try / begin blocks                  |
 | `.catch`, `.except`                  | `error-catch`        | Catch / except handlers             |
-| `.throw`, `.raise`                   | `error-throw`        | Throw / raise expressions           |
+| `.throw`, `.raise`, `.assert`        | `error-throw`        | Throw / raise / assert              |
 | `.finally`, `.ensure`, `.defer`      | `error-finally`      | Finally / defer / ensure            |
 
 ### Literals
@@ -181,7 +201,7 @@ taxonomy:
 |--------------------------------------|----------------------|-------------------------------------|
 | `.str`, `.string`                    | `literal-str`        | String literals                     |
 | `.num`, `.int`, `.float`             | `literal-num`        | Numeric literals                    |
-| `.bool`, `.boolean`                  | `literal-bool`       | Boolean literals                    |
+| `.bool`, `.boolean`, `.null`, `.none`| `literal-atom`       | Atomic literals (booleans and null/None — one engine bucket) |
 | `.list`, `.dict`, `.array`, `.map`   | `literal-coll`       | Collection literals                 |
 
 ### External
@@ -189,7 +209,17 @@ taxonomy:
 | Selector(s)                          | Maps to              | Matches                             |
 |--------------------------------------|----------------------|-------------------------------------|
 | `.import`, `.require`, `.use`        | `external-import`    | Import / require / use statements   |
+| `.include`                           | `external-include`   | `#include` directives (engine classifies them as imports) |
 | `.export`, `.pub`                    | `external-export`    | Exports / pub declarations          |
+| `.extern`, `.ffi`                    | `external-extern`    | Extern / foreign-function declarations |
+
+### Statements & transforms
+
+| Selector(s)                          | Maps to              | Matches                             |
+|--------------------------------------|----------------------|-------------------------------------|
+| `.assign`, `.assignment`             | `statement-assign`   | Assignments                         |
+| `.del`, `.delete`                    | `statement-delete`   | Delete / mutation statements        |
+| `.comp`, `.comprehension`            | `transform-comp`     | Comprehensions (list/dict/set/generator) |
 
 See [`src/pluckit/selectors.py`](https://github.com/teaguesterling/pluckit/blob/main/src/pluckit/selectors.py)
 for the complete alias table.
@@ -198,11 +228,33 @@ for the complete alias table.
 
 A shorthand alias resolves in two steps: `.fn` → pluckit's taxonomy class `.def-func`
 (the form `resolve_alias` exposes) → sitting_duck's semantic-type class
-`.definition_function` (the name its `ast_select` understands). Aliases with no clean
-sitting_duck equivalent, already-canonical sitting_duck names, and bare tree-sitter types
-all pass through unchanged. sitting_duck is the single source of truth for what a class
-matches, so the taxonomy can no longer drift away from the engine. If you find a missing
-alias, [open an issue](https://github.com/teaguesterling/pluckit/issues).
+`.definition_function` (the name its `ast_select` understands). Already-canonical
+sitting_duck names (`.definition_function`, kind/category tokens like `.operator`,
+`.typedef`, `.pattern`) pass through unchanged, as do bare tree-sitter type
+selectors (`return_statement`). sitting_duck is the single source of truth for
+what a class matches. If you find a missing alias,
+[open an issue](https://github.com/teaguesterling/pluckit/issues).
+
+!!! warning "Unknown selector classes raise"
+    A class selector that would compile to a match-nothing predicate raises
+    `UnknownSelectorClassError` instead of silently returning an empty
+    result. That covers typos (`.fnn`), and the handful of taxonomy classes
+    the engine genuinely cannot express — each error message names the
+    working alternative:
+
+    | Selector(s)                    | Why                                            | Use instead                          |
+    |--------------------------------|------------------------------------------------|--------------------------------------|
+    | `.self`, `.this`, `.super`     | `self`/`this` are plain identifiers to the engine | `#self`, `#this`, `[name=self]`   |
+    | `.doc`, `.docstring`           | docstrings are plain string literals            | `.fn .str:first`, `[type=...]`      |
+    | `.guard`                       | no cross-language guard class                   | `[type=guard_statement]`            |
+    | `.new`, `.constructor`         | constructor calls are plain calls               | `.call#Name`, `[type=...]`          |
+    | `.bits`, `.bitwise`            | no bitwise-operator class                       | `.operator`, `[type=binary_operator]` |
+    | `.gen`, `.generator`           | generators classify with comprehensions         | `.comp`, `[type=generator_expression]` |
+    | `.void`, `.any`, `.never`      | no cross-language special-type class            | `[type=...]`                        |
+
+    Classes nested inside pseudo-class arguments (`:has(...)`, `:match(...)`)
+    are not typo-checked — argument text there can legitimately contain dots —
+    but pluckit aliases still resolve inside `:has()` / `:not()`.
 
 ---
 

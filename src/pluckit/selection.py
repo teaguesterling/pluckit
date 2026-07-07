@@ -184,21 +184,30 @@ class Selection:
     def filter(self, *pseudo_selectors: str, **kwargs: Any) -> Selection:
         """Filter nodes by CSS pseudo-classes and/or keyword arguments.
 
-        Pseudo-class selectors like ":exported" are looked up in the registry.
-        Keyword arguments support field=value and field__op=value patterns.
+        Pseudo-class selectors like ":exported" (or ":line(5)") are looked up
+        in the registry; arguments are validated by the same renderer the
+        selector path uses (so a non-integer ":line(...)" arg raises instead
+        of reaching SQL). Keyword arguments support field=value and
+        field__op=value patterns.
         """
-        from pluckit.selectors import PseudoClassRegistry
+        import re as _re
+
+        from pluckit.selectors import PseudoClassRegistry, _render_post_filter
 
         conditions: list[str] = []
 
         # Handle pseudo-class selectors
         registry = PseudoClassRegistry()
         for ps in pseudo_selectors:
-            entry = registry.get(ps)
+            m = _re.fullmatch(
+                r"(?P<name>:[a-zA-Z][\w-]*)(?:\((?P<arg>[^)]*)\))?", ps
+            )
+            entry = registry.get(m.group("name")) if m else None
             if entry is None:
                 raise ValueError(f"Unknown pseudo-class: {ps}")
-            if entry.sql_template:
-                conditions.append(entry.sql_template)
+            cond = _render_post_filter(entry, m.group("arg"))
+            if cond:
+                conditions.append(cond)
 
         # Handle keyword arguments
         for key, value in kwargs.items():
@@ -208,6 +217,14 @@ class Selection:
                     raise ValueError(f"Unknown filter keyword: {key}")
                 if op not in _FILTER_SUFFIXES:
                     raise ValueError(f"Unknown filter keyword: {key}")
+                if op in ("gt", "lt", "gte", "lte") and not isinstance(
+                    value, (int, float)
+                ):
+                    # Comparison values are interpolated into SQL — only
+                    # accept real numbers (a string would be raw SQL text).
+                    raise ValueError(
+                        f"{key} requires a numeric value, got {value!r}"
+                    )
                 if op == "startswith":
                     conditions.append(
                         f"{field} LIKE '{_esc_like(str(value))}%' ESCAPE '\\'"
@@ -421,12 +438,14 @@ class Selection:
 
     def at_line(self, line: int) -> Selection:
         """Filter to nodes that span the given line number."""
+        line = int(line)  # value is interpolated into SQL — integers only
         result = self.filter_sql(f"start_line <= {line} AND end_line >= {line}")
         result._op = ("at_line", (line,), {})
         return result
 
     def at_lines(self, start: int, end: int) -> Selection:
         """Filter to nodes that overlap with the given line range."""
+        start, end = int(start), int(end)  # interpolated into SQL
         result = self.filter_sql(
             f"start_line <= {end} AND end_line >= {start}"
         )
