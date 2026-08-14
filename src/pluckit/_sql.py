@@ -44,23 +44,16 @@ def ast_select_sql(source: str, selector: str) -> str:
     structural, conditions = split_post_filters(selector)
     sel = resolve_aliases(structural)  # .fn → .def-func → .definition_function; sitting_duck owns the rest
     base = f"ast_select('{_esc(source)}', '{_esc(sel)}')"
-    recover = (
-        f"SELECT r.* FROM {base} s "
-        f"JOIN read_ast('{_esc(source)}') r "
-        f"ON r.node_id = s.node_id AND r.file_path = s.file_path"
-    )
     if not conditions:
-        # Recover the read_ast row here too, not just on the post-filter path
-        # below. ``ast_select`` parses with ``peek := 'none'``, so selecting
-        # from it directly returns a NULL peek — which made peek's presence
-        # depend on whether the selector happened to carry a pluckit
-        # pseudo-class. Both branches now yield the same 21-column read_ast
-        # schema with peek populated. (``ast_select`` takes no peek argument,
-        # so the join is the only way to recover it.)
-        return recover
-    # Post-filter outside the subquery so the conditions' bare column names are
-    # unambiguous.
-    return f"SELECT * FROM ({recover}) WHERE {' AND '.join(conditions)}"
+        return f"SELECT * EXCLUDE (start_column, end_column) FROM {base}"
+    # Recover the full read_ast row (peek populated, exact 21-col schema) inside a subquery,
+    # then post-filter outside so the conditions' bare column names are unambiguous.
+    return (
+        f"SELECT * FROM (SELECT r.* FROM {base} s "
+        f"JOIN read_ast('{_esc(source)}') r "
+        f"ON r.node_id = s.node_id AND r.file_path = s.file_path) "
+        f"WHERE {' AND '.join(conditions)}"
+    )
 
 
 def ast_select_from_sql(table: str, selector: str) -> str:
