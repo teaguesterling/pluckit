@@ -25,6 +25,10 @@ class Plucker:
         plugins: Pluckin classes or instances to register.
         repo: Repository root (defaults to cwd). Globs resolve relative to this.
         db: Existing DuckDB connection to reuse.
+        peek: How much source text to materialize into the ``peek`` column
+            (``'smart'`` bounded preview by default, ``'full'`` for whole
+            nodes). Only applies when *cache* is enabled — the uncached path
+            goes through ``ast_select``, which always returns a NULL peek.
         profile: Fledgling profile (e.g. ``'analyst'``). When given without
             *modules*, fledgling loads the profile's default module set.
         modules: Fledgling SQL modules to load (e.g. ``['source', 'code']``).
@@ -40,6 +44,7 @@ class Plucker:
         repo: str | None = None,
         db: duckdb.DuckDBPyConnection | None = None,
         cache: bool | str = False,
+        peek: str | None = None,
         profile: str | None = None,
         modules: list[str] | None = None,
         init: str | bool | None = False,
@@ -66,7 +71,7 @@ class Plucker:
         self._cache = None
         if cache:
             from pluckit.cache import ASTCache
-            self._cache = ASTCache(self._ctx.db)
+            self._cache = ASTCache(self._ctx.db, peek=peek)
 
         for p in (plugins or []):
             instance = p() if isinstance(p, type) else p
