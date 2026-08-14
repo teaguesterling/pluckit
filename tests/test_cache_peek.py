@@ -55,3 +55,17 @@ def test_full_peek_exceeds_default(db, minified):
     default_len = _peek_len(db, ASTCache(db).get_or_create(minified))
     full = ASTCache(db, peek="full")
     assert _peek_len(db, full.get_or_create(minified)) > default_len
+
+
+def test_none_peek_keeps_column_for_schema_stability(db, minified):
+    """peek='none' must not drop the column from a cached table.
+
+    Dropping it leaves a cache table with a different shape from every other
+    one, and ast_select_from over it fails outright ("does not have a column
+    named peek") instead of returning no source text.
+    """
+    table = ASTCache(db, peek="none").get_or_create(minified)
+    cols = [r[0] for r in db.sql(f"DESCRIBE {table}").fetchall()]
+    assert "peek" in cols
+    row = db.sql(f"SELECT peek FROM {table} WHERE semantic_type = 240 LIMIT 1").fetchone()
+    assert row is not None and not row[0]

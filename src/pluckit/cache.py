@@ -38,10 +38,21 @@ class ASTCache:
         self._ensure_index()
 
     def _read_ast_call(self, pattern_literal: str) -> str:
-        """Render the ``read_ast`` call used to materialize a cache table."""
+        """Render the ``read_ast`` call used to materialize a cache table.
+
+        ``peek := 'none'`` drops the column outright rather than emptying it,
+        which would leave a cached table whose schema differs from every other
+        one — and ``ast_select_from`` over it fails with "does not have a
+        column named peek" rather than simply returning no source text. The
+        ``+schema`` suffix keeps the column present and NULL, so a cache table
+        has the same shape whatever extent it was built with.
+        """
         if not self._peek:
             return f"read_ast('{pattern_literal}')"
-        return f"read_ast('{pattern_literal}', peek := '{self._peek}')"
+        peek = self._peek
+        if peek.split("+")[0] == "none" and "+schema" not in peek:
+            peek = "none+schema"
+        return f"read_ast('{pattern_literal}', peek := '{peek}')"
 
     def _ensure_index(self) -> None:
         self._db.sql(f"""
