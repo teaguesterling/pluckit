@@ -23,9 +23,53 @@ class ASTCache:
 
     _INDEX_TABLE = "_pluckit_cache_index"
 
-    def __init__(self, db) -> None:
+    # Bump when the materialized schema changes, so tables built by an older
+    # pluckit are not served to a newer one. Cached tables are keyed by content,
+    # not by code version, so without this a cache built before columns were
+    # materialized keeps being reused and the new capability silently does
+    # nothing — the failure mode is a missing column, not a stale value.
+    _SCHEMA_VERSION = 2
+
+    def __init__(self, db, peek: str | None = None) -> None:
+        """*peek* is the ``read_ast`` peek extent used when materializing.
+
+        This is the only place the extent can be chosen: ``ast_select`` always
+        parses with ``peek := 'none'``, so the cached table — queried later via
+        ``ast_select_from`` — is what decides how much source callers can ever
+        see. ``None`` keeps sitting_duck's default (``'smart'``, a bounded
+        preview). Pass ``'full'`` for minified sources, where a node can be
+        thousands of characters on a single line and the preview truncates it.
+        """
         self._db = db
+        self._peek = peek
         self._ensure_index()
+
+    def _read_ast_call(self, pattern_literal: str) -> str:
+        """Render the ``read_ast`` call used to materialize a cache table.
+
+        ``peek := 'none'`` drops the column outright rather than emptying it,
+        which would leave a cached table whose schema differs from every other
+        one — and ``ast_select_from`` over it fails with "does not have a
+        column named peek" rather than simply returning no source text. The
+        ``+schema`` suffix keeps the column present and NULL, so a cache table
+        has the same shape whatever extent it was built with.
+
+        ``source := 'full'`` is always passed. It is the only way to get
+        ``start_column`` / ``end_column`` into the table at all — at any other
+        extent they are absent from the schema, not merely zero. On minified
+        input those columns are the *only* positional signal that survives:
+        every node reports ``start_line = 1``, so line-addressed extraction
+        returns the whole file, and character offsets are what isolate a node.
+        Two extra integers per row is a cheap price for making the cached table
+        usable on the case it exists to serve.
+        """
+        args = ["source := 'full'"]
+        if self._peek:
+            peek = self._peek
+            if peek.split("+")[0] == "none" and "+schema" not in peek:
+                peek = "none+schema"
+            args.append(f"peek := '{peek}'")
+        return f"read_ast('{pattern_literal}', {', '.join(args)})"
 
     def _ensure_index(self) -> None:
         self._db.sql(f"""
@@ -67,13 +111,13 @@ class ASTCache:
             # Use DESCRIBE to get the schema by selecting from a known file.
             self._db.sql(f"""
                 CREATE OR REPLACE TABLE {table_name} AS
-                SELECT * FROM read_ast('{escaped_pattern}') WHERE 1=0
+                SELECT * FROM {self._read_ast_call(escaped_pattern)} WHERE 1=0
             """)
             total = 0
         else:
             self._db.sql(f"""
                 CREATE OR REPLACE TABLE {table_name} AS
-                SELECT * FROM read_ast('{escaped_pattern}')
+                SELECT * FROM {self._read_ast_call(escaped_pattern)}
             """)
             total = self._db.sql(f"SELECT count(*) FROM {table_name}").fetchone()[0]
 
@@ -96,8 +140,12 @@ class ASTCache:
             if os.path.isfile(f):
                 esc = f.replace("'", "''")
                 try:
+                    # Must use the same peek extent the table was built with,
+                    # or a refreshed file's rows carry a different amount of
+                    # source text than the rest of the table.
                     self._db.sql(
-                        f"INSERT INTO {table_name} SELECT * FROM read_ast('{esc}')"
+                        f"INSERT INTO {table_name} "
+                        f"SELECT * FROM {self._read_ast_call(esc)}"
                     )
                 except Exception:
                     pass
@@ -125,7 +173,16 @@ class ASTCache:
         return [os.path.abspath(f) for f in files if os.path.isfile(f)]
 
     def _hash_pattern(self, pattern: str) -> str:
-        return hashlib.sha256(pattern.encode()).hexdigest()[:16]
+        """Key the cache on the pattern *and* the peek extent.
+
+        The peek extent is baked into the materialized rows, so two callers
+        asking for different extents need different tables. Keying on the
+        pattern alone would serve a table built with a bounded preview to a
+        caller that asked for full source — a silent wrong answer rather than
+        a miss.
+        """
+        key = f"{pattern}\x00peek={self._peek or ''}\x00v={self._SCHEMA_VERSION}"
+        return hashlib.sha256(key.encode()).hexdigest()[:16]
 
     def _sql_list(self, items: list[str]) -> str:
         if not items:

@@ -80,3 +80,32 @@ class TestCallsPluginRegistration:
         sel = pluck.find(".fn#helper")
         with pytest.raises(PluckerError, match="Calls"):
             _ = sel.callers  # noqa: B018
+
+
+class TestReferencesSemantics:
+    """references() is computed by pluckit, not by ``ast_select``.
+
+    There is no ``::references`` pseudo-element in current sitting_duck builds
+    — it is rejected at runtime, and only when a terminal call executes, so
+    these assertions are what keeps the local implementation honest.
+
+    The fixture defines ``helper`` once and uses it twice inside ``consumer``.
+    """
+
+    def test_counts_uses_not_the_definition(self, pluck):
+        """A definition is not a reference to itself."""
+        assert pluck.find(".fn#helper").references().count() == 2
+
+    def test_unused_definition_has_no_references(self, pluck):
+        """`other` is defined and never called."""
+        assert pluck.find(".fn#other").references().count() == 0
+
+    def test_references_are_named_for_the_target(self, pluck):
+        assert set(pluck.find(".fn#helper").references().names()) == {"helper"}
+
+    def test_references_differ_from_callers(self, pluck):
+        """callers() yields the enclosing functions; references() the use sites."""
+        callers = pluck.find(".fn#helper").callers().names()
+        refs = pluck.find(".fn#helper").references().names()
+        assert "consumer" in callers
+        assert "consumer" not in refs

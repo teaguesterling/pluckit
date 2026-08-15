@@ -23,6 +23,7 @@ def _new_connection_with_fledgling(
     profile: str | None = None,
     modules: list[str] | None = None,
     init: str | bool | None = False,
+    persist: str | None = None,
 ) -> tuple[duckdb.DuckDBPyConnection, bool]:
     """Create a DuckDB connection with fledgling macros loaded if available.
 
@@ -40,9 +41,11 @@ def _new_connection_with_fledgling(
     try:
         import fledgling
     except ImportError:
-        return duckdb.connect(), False
+        return duckdb.connect(persist) if persist else duckdb.connect(), False
     try:
         kwargs: dict = {"init": init, "root": repo}
+        if persist is not None:
+            kwargs["persist"] = persist
         if profile is not None:
             kwargs["profile"] = profile
         if modules is not None:
@@ -52,7 +55,7 @@ def _new_connection_with_fledgling(
         con = fledgling.connect(**kwargs)
         return con, True
     except Exception:
-        return duckdb.connect(), False
+        return duckdb.connect(persist) if persist else duckdb.connect(), False
 
 
 class _Context:
@@ -85,9 +88,16 @@ class _Context:
             self.db = db
             self._fledgling_loaded = False
         elif db_path is not None:
-            # Persistent cache connections — skip fledgling macros for now.
-            self.db = duckdb.connect(db_path)
-            self._fledgling_loaded = False
+            # Persistent cache connection. This must still carry fledgling's
+            # macros: callers reach for them regardless of where the connection
+            # points, and code that degrades gracefully when a macro is missing
+            # will then do the wrong thing silently rather than fail (squackit's
+            # de-vendoring filter falls back to an unfiltered glob, so enabling
+            # the cache used to turn vendored-file exclusion off with no signal).
+            self.db, self._fledgling_loaded = _new_connection_with_fledgling(
+                self.repo, profile=profile, modules=modules, init=init,
+                persist=db_path,
+            )
         else:
             self.db, self._fledgling_loaded = _new_connection_with_fledgling(
                 self.repo, profile=profile, modules=modules, init=init,

@@ -628,9 +628,15 @@ _BUILTINS: list[dict] = [
     {
         # Decorators populate the read_ast `modifiers` list (e.g. ['@property']); a bare
         # definition has []. sitting_duck's native :decorated is a stub (0).
+        #
+        # Match on the '@' prefix, not on the list being non-empty: `modifiers`
+        # carries non-decorator modifiers too. Builds since ~mid-2026 record
+        # `async` there, so `len(modifiers) > 0` reports every `async def` as
+        # decorated. Written without a lambda so the predicate does not depend
+        # on which lambda arrow syntax the loaded DuckDB accepts.
         "name": ":decorated",
         "engine": "sitting_duck",
-        "sql_template": "len(modifiers) > 0",
+        "sql_template": "regexp_matches(array_to_string(modifiers, ' '), '(^| )@')",
         "takes_arg": False,
     },
 ]
