@@ -6,7 +6,57 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.15.0] - 2026-08-14
+
+### Added
+- **Cache: choosable peek extent** ([#12]): `ASTCache(db, peek=...)` and
+  `Plucker(..., peek=...)` decide how much source text a cached table
+  carries. `ast_select` always parses with `peek := 'none'`, so the cache
+  path (materialize with `read_ast`, query via `ast_select_from`) is the
+  only way to get source text back, and the extent chosen at
+  *materialization* time is what callers can ever see. The default
+  (`'smart'`) caps at 80 characters — too short for minified code, where one
+  node can be thousands of characters on a single line. `peek='none'` keeps
+  the column present-but-NULL so every cache table has the same shape;
+  otherwise `ast_select_from` fails with "does not have a column named peek"
+  rather than returning no text. Cache keys include the extent.
+- **Cache: source columns** ([#12]): cached tables now materialize with
+  `source := 'full'`, so they carry `start_column` / `end_column`. These were
+  not zeroed before — they were *absent*, since `read_ast` only adds them at
+  that extent. On minified input every node reports `start_line = 1`, so
+  character offsets are the only way to isolate a node: peek says how much
+  text a node carries, the columns say where it is. Measured on a
+  40-function minified bundle: 1 distinct `start_line`, 600 distinct
+  `start_column`. Cache keys gained a schema version, so an existing
+  `.pluckit.duckdb` is not served to code expecting the new shape.
+
 ### Fixed
+- **fledgling macros on cache-backed connections** ([#12]): persistent
+  connections skipped fledgling's macros entirely. Callers reach for them
+  regardless of where the connection points, and code that degrades
+  gracefully when a macro is missing then does the wrong thing *silently* —
+  squackit's de-vendoring filter fell back to an unfiltered glob, so
+  enabling the cache turned vendored-file exclusion off with no signal.
+- **`:decorated` matched every `async def`** ([#12]): the predicate was
+  `len(modifiers) > 0`, but current sitting_duck builds record `async` in
+  `modifiers`. Now matches the `@` prefix, written without a lambda so it
+  does not depend on which lambda arrow syntax the loaded DuckDB accepts.
+- **`references()` used a pseudo-element that does not exist** ([#12]):
+  `ast_select` rejects `::references`, and rejects it at *execution* rather
+  than bind — `sql()`, `.columns`, even `.limit(0).fetchall()` all succeed —
+  so the error escaped from whatever terminal call the caller made, far from
+  the cause. Computed in pluckit now, identically on every build: an
+  identifier node (`semantic_type 80`, `flags & 6 == 2`) matching the name,
+  minus the defining occurrence. sitting_duck gives the identifier inside a
+  definition the same type and flags as a use, so the naive filter reported
+  one reference for a name defined and never used.
+
+### Note
+Requires a `duckdb` that can load a sitting_duck build which populates
+`start_column`. Extensions install per DuckDB version, so DuckDB 1.5.2
+resolves a build that returns 0 for every column regardless of reinstalls;
+1.5.5 resolves a working one.
+
 - **Selector alias drift** ([#10]): documented aliases now resolve to their
   documented targets instead of silently matching nothing or the wrong nodes.
   `.def`/`.let`/`.jump` were missing from the alias table; `.module`/`.ns`/
@@ -54,6 +104,7 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   underscores).
 
 [#10]: https://github.com/teaguesterling/pluckit/issues/10
+[#12]: https://github.com/teaguesterling/pluckit/pull/12
 
 ## [0.14.0] - 2026-06-08
 
