@@ -101,7 +101,9 @@ class TestPostFilters:
     def test_decorated_and_async_have_templates(self):
         reg = PseudoClassRegistry()
         # Previously dead stubs (sql_template=None); now expressed over read_ast columns.
-        assert reg.get(":decorated").sql_template == "len(modifiers) > 0"
+        assert reg.get(":decorated").sql_template == (
+            "regexp_matches(array_to_string(modifiers, ' '), '(^| )@')"
+        )  # not len(modifiers) > 0: `async` is a modifier too
         assert reg.get(":async").sql_template == "peek LIKE 'async %'"
 
     def test_wide_and_last_dropped(self):

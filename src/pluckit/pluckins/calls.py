@@ -6,9 +6,10 @@ Exposes three methods on ``Selection`` when this plugin is loaded:
 - ``callees()`` — functions called by the matched nodes
 - ``references()`` — all references to the matched nodes (call sites + name uses)
 
-All three delegate to sitting_duck's ``ast_select`` macro with the
-corresponding pseudo-element (``::callers``, ``::callees``,
-``::references``) appended to the matched selector.
+``callers()`` and ``callees()`` delegate to sitting_duck's ``ast_select``
+macro with the corresponding pseudo-element appended to the matched
+selector. ``references()`` is computed here — sitting_duck has no
+``::references`` pseudo-element (see that method).
 
 Implementation strategy: walk the Selection's provenance chain to find
 the original ``find`` step's selector, append the pseudo-element, then
@@ -77,8 +78,23 @@ class Calls(Pluckin):
         return self._call_graph_query(selection, "callees")
 
     def references(self, selection: Selection) -> Selection:
-        """Return a new Selection of all references to the matched nodes."""
-        return self._call_graph_query(selection, "references")
+        """Return a new Selection of all references to the matched nodes.
+
+        Resolved in pluckit rather than delegated to ``ast_select``. Unlike
+        ``::callers`` / ``::callees``, there is no ``::references``
+        pseudo-element in current sitting_duck builds — it is rejected at
+        runtime, listing the seven that do exist. Some older builds accepted
+        it, so routing through the extension makes this method's behaviour
+        depend on which extension happens to be installed, and the failure
+        appears only when a terminal call executes. Computing it here keeps
+        the semantics identical on every build.
+        """
+        files = _distinct_files(selection)
+        if not files:
+            return selection._new(_empty_like(selection, files),
+                                  op=("references", (), {}))
+        return selection._new(_references_locally(selection, files),
+                              op=("references", (), {}))
 
     # ------------------------------------------------------------------
     # Internals
@@ -118,6 +134,51 @@ class Calls(Pluckin):
 # ---------------------------------------------------------------------------
 # Pure-ish helpers
 # ---------------------------------------------------------------------------
+
+def _references_locally(selection: Selection, files: list[str]):
+    """Find references to the matched names without ``::references``.
+
+    A reference is an identifier node (``semantic_type = 80``) whose flags mark
+    it as a use rather than a definition (``(flags & 6) == 2``) — the same test
+    the Scope pluckin's ``refs()`` uses. Restricting to the matched names keeps
+    this to references *of the matched nodes*, which is what the method
+    promises; it covers call sites and plain name uses alike, since both are
+    identifier nodes.
+    """
+    view = selection._register("refsrc")
+    try:
+        names = [
+            r[0] for r in selection._ctx.db.sql(
+                f"SELECT DISTINCT name FROM {view} WHERE name IS NOT NULL AND name <> ''"
+            ).fetchall()
+        ]
+    finally:
+        try:
+            selection._unregister(view)
+        except Exception:
+            pass
+
+    if not names:
+        return _empty_like(selection, files)
+
+    name_list = ", ".join("'" + _esc(n) + "'" for n in names)
+    # A definition is not a reference to itself. sitting_duck gives the
+    # identifier *inside* a definition the same semantic_type and flags as any
+    # other use (80 / flags & 6 == 2), so filtering on those alone reports one
+    # reference for a name that is defined and never used. The defining
+    # occurrence is the one whose parent is the definition carrying the same
+    # name; exclude exactly that. COALESCE guards the root row, whose LEFT JOIN
+    # yields NULL and would otherwise drop out of the predicate entirely.
+    unions = [
+        f"""SELECT n.* FROM read_ast('{_esc(f)}') n
+            LEFT JOIN read_ast('{_esc(f)}') p ON p.node_id = n.parent_id
+            WHERE n.semantic_type = 80 AND (n.flags & 6) = 2
+              AND n.name IN ({name_list})
+              AND COALESCE(p.semantic_type = 240 AND p.name = n.name, FALSE) = FALSE"""
+        for f in files
+    ]
+    return selection._ctx.db.sql(" UNION ALL ".join(unions))
+
 
 def _find_root_selector(selection: Selection) -> str | None:
     """Walk the provenance chain to find the original ``find`` selector.
