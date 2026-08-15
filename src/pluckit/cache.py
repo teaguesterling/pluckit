@@ -23,6 +23,13 @@ class ASTCache:
 
     _INDEX_TABLE = "_pluckit_cache_index"
 
+    # Bump when the materialized schema changes, so tables built by an older
+    # pluckit are not served to a newer one. Cached tables are keyed by content,
+    # not by code version, so without this a cache built before columns were
+    # materialized keeps being reused and the new capability silently does
+    # nothing — the failure mode is a missing column, not a stale value.
+    _SCHEMA_VERSION = 2
+
     def __init__(self, db, peek: str | None = None) -> None:
         """*peek* is the ``read_ast`` peek extent used when materializing.
 
@@ -46,13 +53,23 @@ class ASTCache:
         column named peek" rather than simply returning no source text. The
         ``+schema`` suffix keeps the column present and NULL, so a cache table
         has the same shape whatever extent it was built with.
+
+        ``source := 'full'`` is always passed. It is the only way to get
+        ``start_column`` / ``end_column`` into the table at all — at any other
+        extent they are absent from the schema, not merely zero. On minified
+        input those columns are the *only* positional signal that survives:
+        every node reports ``start_line = 1``, so line-addressed extraction
+        returns the whole file, and character offsets are what isolate a node.
+        Two extra integers per row is a cheap price for making the cached table
+        usable on the case it exists to serve.
         """
-        if not self._peek:
-            return f"read_ast('{pattern_literal}')"
-        peek = self._peek
-        if peek.split("+")[0] == "none" and "+schema" not in peek:
-            peek = "none+schema"
-        return f"read_ast('{pattern_literal}', peek := '{peek}')"
+        args = ["source := 'full'"]
+        if self._peek:
+            peek = self._peek
+            if peek.split("+")[0] == "none" and "+schema" not in peek:
+                peek = "none+schema"
+            args.append(f"peek := '{peek}'")
+        return f"read_ast('{pattern_literal}', {', '.join(args)})"
 
     def _ensure_index(self) -> None:
         self._db.sql(f"""
@@ -164,7 +181,7 @@ class ASTCache:
         caller that asked for full source — a silent wrong answer rather than
         a miss.
         """
-        key = f"{pattern}\x00peek={self._peek or ''}"
+        key = f"{pattern}\x00peek={self._peek or ''}\x00v={self._SCHEMA_VERSION}"
         return hashlib.sha256(key.encode()).hexdigest()[:16]
 
     def _sql_list(self, items: list[str]) -> str:
